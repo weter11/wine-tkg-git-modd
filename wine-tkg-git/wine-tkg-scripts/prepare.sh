@@ -315,6 +315,15 @@ _init() {
     if [ "$_use_dxvk" = "true" ] || [ "$_use_dxvk" = "release" ]; then
       _use_dxvk="release"
     fi
+    # Translate _steam_edition (user-friendly) to _steamclient_noswap (internal).
+    # _steam_edition takes priority when set to "linux" or "windows".
+    if [ "$_steam_edition" = "windows" ]; then
+      _steamclient_noswap="true"
+    elif [ "$_steam_edition" = "linux" ]; then
+      _steamclient_noswap="false"
+    elif [ -n "$_steam_edition" ]; then
+      warning "_steam_edition='$_steam_edition' is not a valid value. Use \"linux\" or \"windows\". Falling back to _steamclient_noswap=\"$_steamclient_noswap\"."
+    fi
     #if [ "$_ispkgbuild" = "true" ]; then
     #  _steamvr_support="false"
     #fi
