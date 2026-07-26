@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install System Dependencies
         run: |
@@ -45,7 +45,7 @@ jobs:
           "
 
       - name: Archive Build Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proton-tkg-build
           path: proton-tkg/built/*.tar
