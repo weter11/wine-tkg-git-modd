@@ -16,8 +16,7 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          echo -e "[multilib]\nInclude = /etc/pacman.d/mirrorlist" >> /etc/pacman.conf
-          pacman -Syu --noconfirm base-devel sudo lib32-jack2 git vulkan-headers
+          pacman -Syu --noconfirm base-devel sudo git vulkan-headers
 
       - name: Create User
         run: |
@@ -33,8 +32,8 @@ jobs:
             sed -i 's/uninstaller=\"false\"/uninstaller=\"true\"/' proton-tkg.cfg
             sed -i 's/autoinstall=\"false\"/autoinstall=\"true\"/' proton-tkg.cfg
             sed -i 's/LOCAL_PRESET=\"\"/LOCAL_PRESET=\"none\"/' proton-tkg.cfg
+            printf '_steamclient_noswap="true"\n_NOLIB32="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
             sed -i 's/build_gstreamer=\"false\"/build_gstreamer=\"true\"/' proton-tkg.cfg
-            sed -i 's/lib32_gstreamer=\"false\"/lib32_gstreamer=\"true\"/' proton-tkg.cfg
             sed -i 's/wayland_driver=\"false\"/wayland_driver=\"true\"/' proton-tkg.cfg
             sed -i 's/_use_ntsync=\"false\"/_use_ntsync=\"true\"/' proton-tkg.cfg
             sed -i 's/_use_esync=\"true\"/_use_esync=\"false\"/' proton-tkg.cfg

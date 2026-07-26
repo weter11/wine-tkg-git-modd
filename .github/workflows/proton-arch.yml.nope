@@ -12,13 +12,14 @@ jobs:
       - uses: actions/checkout@v2
       - name: Compile
         run: |
-          echo -e "[multilib]\nInclude = /etc/pacman.d/mirrorlist" >> /etc/pacman.conf
-          pacman -Syu --noconfirm base-devel sudo lib32-jack2
+          # Keep the build strictly 64-bit; the inactive legacy workflow does not need lib32 JACK.
+          pacman -Syu --noconfirm base-devel sudo
           useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown user -R ..
           chown user -R /tmp
           export CARGO_HOME="$PWD"
           cd proton-tkg
+          printf '_steamclient_noswap="true"\n_NOLIB32="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
           su user -c "yes ''|PKGDEST=/tmp/proton-tkg makepkg --noconfirm -s"
 
       - name: Archive the artifacts
