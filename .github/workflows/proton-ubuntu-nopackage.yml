@@ -11,6 +11,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Compile
         run: |
+          # Keep the runner strictly 64-bit; Proton's WoW64 build does not need an i686 Rust target.
           sudo apt update
           export CARGO_HOME="$PWD"
           cd proton-tkg
