@@ -24,6 +24,7 @@ jobs:
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
           printf '_LOCAL_PRESET="valve-exp-bleeding"\n' >> proton-tkg.cfg
           printf '_steamclient_noswap="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
+          # Build only the 64-bit package; 32-bit GStreamer is intentionally omitted.
           printf '_NOLIB32="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
           sed -i 's/build_gstreamer="false"/build_gstreamer="true"/' proton-tkg.cfg
           sed -i 's/wayland_driver="false"/wayland_driver="true"/' proton-tkg.cfg
