@@ -16,7 +16,7 @@ jobs:
           useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown user -R . && cd wine-tkg-git
           echo '_OW2_fix="true"' >> customization.cfg
-          # Wine-TkG uses "wow64" to disable the separate 32-bit build.
+          # Wine-TkG uses "wow64" for WoW64 mode instead of a separate 32-bit build.
           printf '_NOLIB32="wow64"\n' >> wine-tkg-profiles/advanced-customization.cfg
           su user -c "yes|PKGDEST=/tmp/wine-tkg makepkg --noconfirm -s"
 
