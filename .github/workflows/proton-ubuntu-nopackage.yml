@@ -11,14 +11,13 @@ jobs:
       - uses: actions/checkout@v7
       - name: Compile
         run: |
-          sudo dpkg --add-architecture i386
           sudo apt update
           export CARGO_HOME="$PWD"
-          rustup target add i686-unknown-linux-gnu
           cd proton-tkg
           sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
           sed -i 's/LOCAL_PRESET=""/LOCAL_PRESET="none"/' proton-tkg.cfg
+          printf '_steamclient_noswap="true"\n_NOLIB32="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
           echo '_ci_build="true"' >> proton-tkg.cfg
           touch tarplz
