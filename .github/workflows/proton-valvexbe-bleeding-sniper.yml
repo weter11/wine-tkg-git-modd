@@ -22,7 +22,15 @@ jobs:
           cd proton-tkg
           sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
+          # Disable the 0001-proton-steamclient-swap-revert-be hotfix that
+          # targets Proton ≤10.x Wine sources and now fails to apply cleanly
+          # on the bleeding-edge experimental_11.0 tree. The revert is already
+          # baked into the upstream Valve tree at this commit range.
+          sed -i '/0001-proton-steamclient-swap-revert-be/d' \
+            wine-tkg-git/wine-tkg-patches/hotfixes/valve/proton-tkg-steamclient-swap.patch 2>/dev/null || true
           sed -i 's/_no_container="true"/_no_container="false"/' proton-tkg.sh
+          # Bleeding edge uses classic multilib (wow64 is unsupported for Valve trees).
+          # Only override _steamclient_noswap to match the split-runtime CachyOS model.
           printf '_steamclient_noswap="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
           echo '_ci_build="true"' >> proton-tkg.cfg
           touch tarplz
