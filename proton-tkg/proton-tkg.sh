@@ -1034,7 +1034,7 @@ else
       git clean -xdf
       #git pull
       patch -Np1 < "$_nowhere/proton_template/LiberationMono-Regular.patch"
-      make -j$(nproc)
+      make -s -j$(nproc)
       cp -rv liberation-fonts-ttf*/Liberation{Sans-Regular,Sans-Bold,Serif-Regular,Mono-Regular}.ttf "$_nowhere/proton_template/share/fonts"/
       cd "$_nowhere"
 
