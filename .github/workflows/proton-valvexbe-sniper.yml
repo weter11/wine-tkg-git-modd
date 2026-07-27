@@ -1,8 +1,6 @@
 name: Proton valvexbe sniper container
 
 on:
-  schedule:
-    - cron:  '45 8,20 * * *'
   workflow_dispatch:
 
 jobs:
@@ -24,7 +22,7 @@ jobs:
           cd proton-tkg
           sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
-          printf '_steamclient_noswap="true"\n_NOLIB32="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
+          printf '_steamclient_noswap="true"\n_NOLIB32="false"\n' >> proton-tkg-profiles/advanced-customization.cfg
           sed -i 's/_no_container="true"/_no_container="false"/' proton-tkg.sh
           echo '_ci_build="true"' >> proton-tkg.cfg
           touch tarplz

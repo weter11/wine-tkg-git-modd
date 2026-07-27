@@ -1,8 +1,6 @@
 name: Proton nopackage Arch Linux NTSYNC CI
 
 on:
-  schedule:
-    - cron: '25 9,21 * * *'
   workflow_dispatch:
 
 jobs:
@@ -32,7 +30,7 @@ jobs:
             sed -i 's/uninstaller=\"false\"/uninstaller=\"true\"/' proton-tkg.cfg
             sed -i 's/autoinstall=\"false\"/autoinstall=\"true\"/' proton-tkg.cfg
             sed -i 's/LOCAL_PRESET=\"\"/LOCAL_PRESET=\"none\"/' proton-tkg.cfg
-            printf '_steamclient_noswap="true"\n_NOLIB32="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
+            printf '_steamclient_noswap="true"\n_NOLIB32="false"\n' >> proton-tkg-profiles/advanced-customization.cfg
             sed -i 's/build_gstreamer=\"false\"/build_gstreamer=\"true\"/' proton-tkg.cfg
             sed -i 's/wayland_driver=\"false\"/wayland_driver=\"true\"/' proton-tkg.cfg
             sed -i 's/_use_ntsync=\"false\"/_use_ntsync=\"true\"/' proton-tkg.cfg
