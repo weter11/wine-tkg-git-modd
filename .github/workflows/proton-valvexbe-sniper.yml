@@ -16,6 +16,7 @@ jobs:
           safe-packages: "patch,git"
       - name: Display Analysis
         run: echo '${{ steps.cleanup.outputs.space-analysis }}'
+        id: cleanup                  
       - uses: actions/checkout@v7
       - name: Compile
         run: |
