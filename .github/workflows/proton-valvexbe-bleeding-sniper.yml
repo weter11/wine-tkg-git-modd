@@ -1,4 +1,4 @@
-name: Proton Valve Exp Bleeding Edge sniper container
+name: Proton Valve xbe nopackage Arch Linux CI (zip)
 
 on:
   workflow_dispatch:
@@ -6,38 +6,65 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: archlinux:latest          # ← was: implicit ubuntu-latest
+    container: archlinux:latest
 
     steps:
       - uses: actions/checkout@v7
-            - name: Compile
+
+      - name: Compile
         run: |
-          pacman -Syu --noconfirm base-devel sudo
+          pacman -Syu --noconfirm base-devel sudo zip
           useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown user -R ..
           chown user -R /tmp
           export CARGO_HOME="$PWD"
           cd proton-tkg
+
+          # --- Valve Experimental Bleeding Edge wine tree ---
+          printf '_LOCAL_PRESET="valve-exp-bleeding"\n' >> proton-tkg.cfg
+
+          # --- base build settings ---
           sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
-          printf '_LOCAL_PRESET="valve-exp-bleeding"\n' >> proton-tkg.cfg
-          printf '_steamclient_noswap="true"\n_NOLIB32="false"\n' >> proton-tkg-profiles/advanced-customization.cfg
+          sed -i 's/build_gstreamer="false"/build_gstreamer="true"/' proton-tkg.cfg
+          sed -i 's/wayland_driver="false"/wayland_driver="true"/' proton-tkg.cfg
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
+
+          # --- Windows Steam client instead of swapped-in Linux steamclient ---
+          # NOLIB32 stays "false": Valve's trees are always classic split
+          # win32+win64 multilib builds, there is no WoW64 variant to opt into.
+          printf '_steamclient_noswap="true"\n_NOLIB32="false"\n' >> proton-tkg-profiles/advanced-customization.cfg
+
           echo '_ci_build="true"' >> proton-tkg.cfg
-          touch tarplz
-          # Quiet build: full log to file, only errors/summary on console
-          export MAKEFLAGS="-s --no-print-directory"
-          yes | ./proton-tkg.sh > build.log 2>&1 || true
-          echo "===== FILTERED BUILD ERRORS ====="
-          grep -niE 'error:|fatal error|recipe for target .* failed|undefined reference|cannot find|command not found|No such file or directory|make\[[0-9]+\]: \*\*\*' build.log | head -n 80 || true
-          echo "===== LAST 150 LINES ====="
-          tail -n 150 build.log
-          if grep -qiE 'recipe for target .* failed|fatal error' build.log; then
-            echo "BUILD FAILED — see filtered output above and the build.log artifact"; exit 1
-          fi
+
+          # --- quiet the build so the step doesn't get truncated ---
+          export MAKEFLAGS="-s"
+          set -o pipefail
+
+          yes | ./proton-tkg.sh 2>&1 | tee build.log
+
+      - name: Show build errors if it failed
+        if: failure()
+        run: |
+          echo "### Build failure summary" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" proton-tkg/build.log | tail -150 >> "$GITHUB_STEP_SUMMARY" || echo "No matching error lines found, check the full log artifact." >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload full build log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: valve-bleeding-build-log
+          name: proton-tkg-valvexbe-build-log
           path: proton-tkg/build.log
+
+      - name: Zip the artifact
+        run: |
+          cd proton-tkg/built
+          zip -r proton-tkg-valvexbe.zip proton_tkg_*
+
+      - name: Archive the artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: proton-tkg-valvexbe-build
+          path: proton-tkg/built/*.zip
