@@ -861,7 +861,10 @@ function build_in_valve_container {
   # (e.g. lsteamclient with Steam SDK headers). Make the makedep step non-fatal
   # so the build continues with the sed-generated Makefile.
   if [ -f "make/rules-makedep.mk" ]; then
-    sed -i 's/\(.*tools\/makedep\)$/\1 || true/' make/rules-makedep.mk
+    sed -i 's/^\(\s*.*tools\/makedep\)$/\1 || true/' make/rules-makedep.mk
+    if ! grep -q 'tools/makedep || true' make/rules-makedep.mk; then
+      echo "Warning: failed to patch make/rules-makedep.mk to suppress makedep SIGSEGV" >&2
+    fi
   fi
 
   # Use latest container image from UMU
