@@ -857,6 +857,13 @@ function build_in_valve_container {
   # We *will* face warnings
   sed -i "/--enable-werror.*/d" Makefile.in
 
+  # Mainline wine's makedep can segfault when processing non-wine source trees
+  # (e.g. lsteamclient with Steam SDK headers). Make the makedep step non-fatal
+  # so the build continues with the sed-generated Makefile.
+  if [ -f "make/rules-makedep.mk" ]; then
+    sed -i 's/\(.*tools\/makedep\)$/\1 || true/' make/rules-makedep.mk
+  fi
+
   # Use latest container image from UMU
   # note regarding Proton (bleeding edge) 11: using steamrt4 instead for a little while due to missing deps in UMU image
   if [ -z "$_bleeding_tag" ] && [ "$_unfrog" = "true" ]; then
