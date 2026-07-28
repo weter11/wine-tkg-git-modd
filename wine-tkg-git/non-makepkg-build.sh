@@ -149,10 +149,14 @@ _src_init() {
     rm -rf "${srcdir}/${_winesrcdir}" && git clone "$_where"/"${_winesrcdir}" "${srcdir}/${_winesrcdir}"
     cd "${srcdir}"/"${_winesrcdir}"
     git -c advice.detachedHead=false checkout --force --no-track -B makepkg origin/HEAD
-    # Honor _staging_upstreamignore: when set, pin to the exact commit even with
-    # staging enabled (otherwise the &&/|| precedence below drops the checkout
-    # and we silently build origin/HEAD instead of the requested _plain_version).
-    if { [ -n "$_plain_version" ] && { [ "$_use_staging" != "true" ] || [ "$_staging_upstreamignore" = "true" ]; }; } || [[ "$_custom_wine_source" = *"ValveSoftware"* ]]; then
+    # PROBE: report the resolved pin vars so CI logs show whether config reached here
+    echo "PROBE non-makepkg checkout: _plain_version=[$_plain_version] _use_staging=[$_use_staging] _staging_upstreamignore=[$_staging_upstreamignore] _custom_wine_source=[$_custom_wine_source]" | tee -a "$_where"/prepare.log
+    # Honor _plain_version unconditionally when set (it exists precisely to pin a
+    # commit). The upstream condition only pinned when staging was OFF or the source
+    # was Valve, so with _use_staging=true the pin was silently dropped and we built
+    # origin/HEAD. prepare.sh:616's staging reset is still gated on
+    # _staging_upstreamignore so staging applies on top of the pinned commit.
+    if [ -n "$_plain_version" ] || [[ "$_custom_wine_source" = *"ValveSoftware"* ]]; then
       git -c advice.detachedHead=false checkout "${_plain_version}" 2>>"$_where"/prepare.log
       if [ "$_LOCAL_PRESET" = "valve-exp-bleeding" ]; then
         if [ -z "$_bleeding_tag" ]; then

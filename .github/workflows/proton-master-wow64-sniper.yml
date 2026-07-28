@@ -35,17 +35,27 @@ jobs:
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
 
+          # --- proton-side config: proton-tkg.sh does NOT source advanced-customization.cfg,
+          # so set the proton-build defaults directly here (same pattern as the NOLIB32 sed below).
+          sed -i 's/_steamvr_support="true"/_steamvr_support="false"/' proton-tkg.sh
+          sed -i 's/_NOLIB32="false"/_NOLIB32="wow64"/' proton-tkg.sh
+
           # --- pin to the commit the rebased swap patch targets ---
           printf '_plain_version="7177ece86ca3ab0bd2da0e091c143aa888d856de"\n' >> proton-tkg.cfg
 
           # --- make the commit pin actually land ---
-          # PKGBUILD only emits #commit= (vs the staging base) when _use_staging is
-          # false OR (_use_staging=true AND _staging_upstreamignore=true). The fork
-          # defaults to _use_staging=true, so without this the build silently resets
-          # wine HEAD to the wine-staging base (e.g. "Release 11.14") and the
-          # 7177ece8-rebased swap patch fails to apply.
+          # PKGBUILD / non-makepkg only emit #commit= (vs origin/HEAD) when _use_staging
+          # is false OR (_use_staging=true AND _staging_upstreamignore=true). The fork
+          # defaults to _use_staging=true, so without this the build silently uses
+          # origin/HEAD (master) and the 7177ece8-rebased swap patch fails to apply.
+          # Write it to BOTH proton-tkg.cfg (sourced first in _init) and
+          # advanced-customization.cfg to remove any sourcing-path ambiguity.
+          printf '_staging_upstreamignore="true"\n' >> proton-tkg.cfg
           printf '_staging_upstreamignore="true"\n' \
             >> proton-tkg-profiles/advanced-customization.cfg
+
+          # --- debug: confirm the workflow actually set the pin vars ---
+          echo "DEBUG workflow vars: _plain_version=$(grep -m1 _plain_version proton-tkg.cfg | tail -1) _staging_upstreamignore=$(grep -m1 _staging_upstreamignore proton-tkg.cfg | tail -1) proton _steamvr_support=$(grep -m1 _steamvr_support proton-tkg.sh | tail -1) proton _NOLIB32=$(grep -m1 _NOLIB32 proton-tkg.sh | tail -1)"
 
           # --- single 64-bit WoW64 process; Windows Steam via real winegcc (no -m32) ---
           # VR support is broken and pulls in a winemaker/openvr step that needs the
