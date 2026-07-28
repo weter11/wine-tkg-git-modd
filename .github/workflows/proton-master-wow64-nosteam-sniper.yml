@@ -48,6 +48,13 @@ jobs:
           sed -i '/^      build_lsteamclient$/d' proton-tkg.sh
           sed -i '/^      build_steamhelper$/d' proton-tkg.sh
 
+          # --- disable wine-staging: the fork's default staging version expects a
+          # different wine base than 7177ece8, so staging/patchinstall fails and
+          # shifts the context the swap patch needs. The swap patch is proven to
+          # apply cleanly on plain 7177ece8 without staging; staging compat fixes
+          # can be re-pinned later once a matching staging version is chosen.
+          printf '_use_staging="false"\n' >> proton-tkg.cfg
+
           # --- pin to the commit the rebased swap patch targets ---
           printf '_plain_version="7177ece86ca3ab0bd2da0e091c143aa888d856de"\n' >> proton-tkg.cfg
 
