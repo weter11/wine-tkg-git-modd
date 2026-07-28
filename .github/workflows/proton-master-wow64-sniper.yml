@@ -13,7 +13,21 @@ jobs:
 
       - name: Compile
         run: |
-          pacman -Syu --noconfirm base-devel sudo zip
+          # --- safety net: force --noconfirm on every pacman call, system-wide.
+          # wine-tkg-git/wine-tkg-scripts/deps builds "pacman -S${_confirm_str} --needed"
+          # where _confirm_str is "y" (glued onto -S, becoming -Sy, NOT --noconfirm) or "".
+          # It relies entirely on `yes | ...` feeding stdin. That breaks the moment pacman
+          # needs a NUMBERED provider-choice prompt instead of a Y/n one (e.g. picking
+          # between providers of a virtual package) -- "y" is not a valid number, pacman
+          # reprompts forever, and `yes` never stops sending "y", hanging the runner.
+          cat > /usr/local/bin/pacman <<'PACWRAP'
+          #!/bin/bash
+          exec /usr/bin/pacman --noconfirm "$@"
+          PACWRAP
+          chmod +x /usr/local/bin/pacman
+          export PATH="/usr/local/bin:$PATH"
+
+          pacman -Syu base-devel sudo zip
           useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown user -R ..
           chown user -R /tmp
@@ -24,10 +38,11 @@ jobs:
           sed -i 's/LOCAL_PRESET=""/LOCAL_PRESET="none"/' proton-tkg.cfg
 
           # --- base build settings ---
+          # (gstreamer/ffmpeg media-conversion and wayland support deliberately
+          # left at their defaults -- neither was asked for, and ffmpeg's "jack"
+          # virtual dependency is exactly what triggered the provider-prompt hang.)
           sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
-          sed -i 's/build_gstreamer="false"/build_gstreamer="true"/' proton-tkg.cfg
-          sed -i 's/wayland_driver="false"/wayland_driver="true"/' proton-tkg.cfg
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
 
           # --- Windows Steam client instead of swapped-in Linux steamclient ---
