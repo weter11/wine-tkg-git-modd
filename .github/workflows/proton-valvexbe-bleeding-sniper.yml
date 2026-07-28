@@ -16,7 +16,7 @@ jobs:
           safe-packages: "patch,git"
       - name: Display Analysis
         run: echo '${{ steps.cleanup.outputs.space-analysis }}'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Compile
         run: |
           cd proton-tkg
@@ -38,7 +38,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload full build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proton-tkg-valvexbe-build-log
           path: proton-tkg/build.log
@@ -47,22 +47,7 @@ jobs:
           cd proton-tkg/built
           zip -r proton-tkg-build.zip proton_tkg_*
       - name: Archive the artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proton-tkg-build
           path: proton-tkg/built/*.zip
-```
-
-Changes from last version:
-- `MAKEFLAGS="-s"` + `tee build.log` to quiet output and save full log
-- `pipefail` so the step actually fails when the build fails
-- Error summary step (runs on failure, posts grep to step summary)
-- Upload build log step (always, for post-mortem)
-
----
-
-## 2. WoW64 master workflow — the patch failure
-
-The error is `proton-tkg-steamclient-swap-wow64.patch` failing to apply. Despite `_steamclient_noswap="true"`, this patch is **not** suppressed by that flag — it's a separate WoW64 memory-layout patch that's always applied in WoW64 mode.
-
-Let me look at the actual patch-selection code to find the right pin commit.
