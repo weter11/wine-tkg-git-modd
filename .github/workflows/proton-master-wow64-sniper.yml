@@ -34,7 +34,7 @@ jobs:
           # (proton-tkg.sh never reads advanced-customization.cfg; non-makepkg's
           # dep-install gate reads _NOLIB32 before the wine checkout), so env
           # propagation is the reliable path.
-          export _NOLIB32="true"
+          export _NOLIB32="wow64"
           export _steamvr_support="false"
           export _plain_version="7177ece86ca3ab0bd2da0e091c143aa888d856de"
           export _staging_upstreamignore="true"
@@ -50,7 +50,7 @@ jobs:
           # --- proton-side config: proton-tkg.sh does NOT source advanced-customization.cfg,
           # so set the proton-build defaults directly here (same pattern as the NOLIB32 sed below).
           sed -i 's/_steamvr_support="true"/_steamvr_support="false"/' proton-tkg.sh
-          sed -i 's/_NOLIB32="false"/_NOLIB32="true"/' proton-tkg.sh
+          sed -i 's/_NOLIB32="false"/_NOLIB32="wow64"/' proton-tkg.sh
 
           # --- disable wine-staging: the fork's default staging version expects a
           # different wine base than 7177ece8, so staging/patchinstall fails and
@@ -76,12 +76,14 @@ jobs:
           # --- debug: confirm the workflow actually set the pin vars ---
           echo "DEBUG workflow vars: _plain_version=$(grep -m1 _plain_version proton-tkg.cfg | tail -1) _staging_upstreamignore=$(grep -m1 _staging_upstreamignore proton-tkg.cfg | tail -1) proton _steamvr_support=$(grep -m1 _steamvr_support proton-tkg.sh | tail -1) proton _NOLIB32=$(grep -m1 _NOLIB32 proton-tkg.sh | tail -1)"
 
-          # --- pure 64-bit build (no 32-bit at all); 64-bit Windows Steam + DX12 games.
-          # _NOLIB32="true" makes proton-tkg.sh skip the 32-bit lsteamclient build
-          # (which needs a wine32 prefix that doesn't exist here). ---
+          # --- _NOLIB32="wow64": Proton-compatible WoW64. Proton builds forbid pure
+          # _NOLIB32="true" (prepare.sh forces it back to false), so wow64 is the mode
+          # that skips 32-bit dep install AND serves 32-bit games via the 64-bit prefix.
+          # The 32-bit lsteamclient build is skipped (no wine32 prefix); 64-bit Windows
+          # Steam + DX12 games use the win64 lsteamclient.dll.so bridge. ---
           # VR support is broken and pulls in a winemaker/openvr step that needs the
           # Proton tree (not cloned under _no_container="true") -> disable it.
-          printf '_NOLIB32="true"\n_steamvr_support="false"\n' \
+          printf '_NOLIB32="wow64"\n_steamvr_support="false"\n' \
             >> proton-tkg-profiles/advanced-customization.cfg
 
           # --- Wow64 workaround: lsteamclient/steamhelper do native winegcc -m32

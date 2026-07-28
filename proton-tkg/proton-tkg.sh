@@ -314,12 +314,12 @@ function build_lsteamclient {
   cd ../..
 
   cd build/lsteamclient.win32
-  if [ "$_NOLIB32" != "true" ]; then
+  if [ "$_NOLIB32" != "true" ] && [ "$_NOLIB32" != "wow64" ]; then
     winemaker $WINEMAKERFLAGS --dll -DSTEAM_API_EXPORTS -Dprivate=public -Dprotected=public --wine32 .
     sed -re 's@_LDFLAGS=@_LDFLAGS= -static-libgcc -static-libstdc++ -ldl @' -i "$_nowhere/Proton/build/lsteamclient.win32/Makefile"
     make -e CC="winegcc -m32" CXX="wineg++ -m32 $_cxx_addon" -C "$_nowhere/Proton/build/lsteamclient.win32" -j$(nproc) && strip --strip-debug lsteamclient.dll.so || exit 1
   fi
-  if [ "$_new_lib_paths_69" = "true" ]; then
+  if [ "$_new_lib_paths_69" = "true" ] && [ "$_NOLIB32" != "wow64" ]; then
     touch "$_nowhere/Proton/build/lsteamclient.win32/steamclient.spec"
     winebuild --dll --fake-module -m32 -E "$_nowhere/Proton/build/lsteamclient.win32/steamclient.spec" --dll-name=lsteamclient -o lsteamclient.dll.fake || exit 1
   fi
@@ -329,26 +329,32 @@ function build_lsteamclient {
   if [ "$_wow64_paths" = "true" ]; then
     cp -v Proton/build/lsteamclient.win64/lsteamclient.dll.so proton_dist_tmp/$_lib64name/wine/x86_64-unix/
     cp -v Proton/build/lsteamclient.win64/lsteamclient.dll.fake proton_dist_tmp/$_lib64name/wine/x86_64-windows/lsteamclient.dll
-    cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.fake proton_dist_tmp/$_lib64name/wine/i386-windows/lsteamclient.dll
+    if [ "$_NOLIB32" != "wow64" ]; then
+      cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.fake proton_dist_tmp/$_lib64name/wine/i386-windows/lsteamclient.dll
+    fi
   elif [ "$_new_lib_paths" = "true" ]; then
     if [ "$_new_lib_paths_69" = "true" ]; then
       cp -v Proton/build/lsteamclient.win64/lsteamclient.dll.so proton_dist_tmp/$_lib64name/wine/x86_64-unix/
-      if [ "$_NOLIB32" != "true" ]; then
+      if [ "$_NOLIB32" != "true" ] && [ "$_NOLIB32" != "wow64" ]; then
         cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.so proton_dist_tmp/$_lib32name/wine/i386-unix/
       fi
     else
       cp -v Proton/build/lsteamclient.win64/lsteamclient.dll.so proton_dist_tmp/$_lib64name/wine/
       cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.so proton_dist_tmp/$_lib32name/wine/
     fi
-    if [ "$_new_lib_paths_69" = "true" ] && [ -d proton_dist_tmp/$_lib32name/wine/i386-windows ] && [ -d proton_dist_tmp/$_lib64name/wine/x86_64-windows ]; then
+    if [ "$_new_lib_paths_69" = "true" ] && [ "$_NOLIB32" != "wow64" ] && [ -d proton_dist_tmp/$_lib32name/wine/i386-windows ] && [ -d proton_dist_tmp/$_lib64name/wine/x86_64-windows ]; then
       cp -v Proton/build/lsteamclient.win64/lsteamclient.dll.fake proton_dist_tmp/$_lib64name/wine/x86_64-windows/lsteamclient.dll
       cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.fake proton_dist_tmp/$_lib32name/wine/i386-windows/lsteamclient.dll
     fi
   else
     cp -v Proton/build/lsteamclient.win64/lsteamclient.dll.so proton_dist_tmp/$_lib64name/wine/
-    cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.so proton_dist_tmp/$_lib32name/wine/
+    if [ "$_NOLIB32" != "wow64" ]; then
+      cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.so proton_dist_tmp/$_lib32name/wine/
+    fi
     cp -v Proton/build/lsteamclient.win64/lsteamclient.dll.fake proton_dist_tmp/$_lib64name/wine/fakedlls/lsteamclient.dll
-    cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.fake proton_dist_tmp/$_lib32name/wine/fakedlls/lsteamclient.dll
+    if [ "$_NOLIB32" != "wow64" ]; then
+      cp -v Proton/build/lsteamclient.win32/lsteamclient.dll.fake proton_dist_tmp/$_lib32name/wine/fakedlls/lsteamclient.dll
+    fi
   fi
 }
 
