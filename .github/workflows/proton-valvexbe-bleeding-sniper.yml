@@ -14,9 +14,12 @@ jobs:
           analyze-space-savings: true
           clean-all: true
           safe-packages: "patch,git"
+
       - name: Display Analysis
         run: echo '${{ steps.cleanup.outputs.space-analysis }}'
-      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v7
+
       - name: Compile
         run: |
           cd proton-tkg
@@ -29,20 +32,20 @@ jobs:
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
           sed -i 's/_no_container="true"/_no_container="false"/' proton-tkg.sh
 
-          # --- Windows Steam client instead of swapped-in Linux steamclient ---
-          printf '_steamclient_noswap="true"\n' \
-            >> proton-tkg-profiles/advanced-customization.cfg
+          # NOTE: Do NOT set _steamclient_noswap here. On experimental_11.0 the
+          # valve hotfixes script would copy 0001-proton-steamclient-swap-revert-be.mypatch
+          # (a proton-7.0-era patch that edits files deleted in 11.0) and the build dies.
+          # Leaving the default swap in place is also what you want for running Steam games.
 
-          # --- Disable incompatible hotfix for experimental_11.0 ---
-          # 0001-proton-steamclient-swap-revert-be.mypatch targets
-          # Proton ≤10.x source layout. experimental_11.0 has moved those
-          # symbols, causing a patch-apply failure.
-          rm -f ../wine-tkg-git/wine-tkg-patches/hotfixes/valve/0001-proton-steamclient-swap-revert-be.mypatch
+          # --- Neutralize the steamclient-noswap hotfix block so it can never fire,
+          # even if _steamclient_noswap gets set somewhere later. ---
+          sed -i '/^if \[ "\$_steamclient_noswap" = "true" \]; then/,/^fi$/d' \
+            ../wine-tkg-git/wine-tkg-patches/hotfixes/valve/hotfixes
 
           echo '_ci_build="true"' >> proton-tkg.cfg
           touch tarplz
 
-          # --- quiet the build so the step doesn't get truncated ---
+          # --- quiet the build so the step isn't truncated ---
           export MAKEFLAGS="-s"
           set -o pipefail
 
@@ -61,7 +64,7 @@ jobs:
 
       - name: Upload full build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proton-tkg-valvexbe-bleeding-build-log
           path: proton-tkg/build.log
