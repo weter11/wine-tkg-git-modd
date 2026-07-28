@@ -157,7 +157,17 @@ _src_init() {
     # origin/HEAD. prepare.sh:616's staging reset is still gated on
     # _staging_upstreamignore so staging applies on top of the pinned commit.
     if [ -n "$_plain_version" ] || [[ "$_custom_wine_source" = *"ValveSoftware"* ]]; then
-      git -c advice.detachedHead=false checkout "${_plain_version}" 2>>"$_where"/prepare.log
+      # Try the direct checkout first; if the working clone lacks the object
+      # (secondary clone only fetches advertised refs), fetch it from the local
+      # mirror and retry. Report the outcome + resulting HEAD to the build log.
+      if git -c advice.detachedHead=false checkout "${_plain_version}" 2>>"$_where"/prepare.log; then
+        echo "PIN OK: checked out ${_plain_version}" | tee -a "$_where"/prepare.log
+      else
+        echo "PIN WARN: direct checkout of ${_plain_version} failed, fetching from mirror..." | tee -a "$_where"/prepare.log
+        git fetch "$_where"/"${_winesrcdir}" "${_plain_version}" 2>>"$_where"/prepare.log ||           git fetch origin "${_plain_version}" 2>>"$_where"/prepare.log || true
+        git -c advice.detachedHead=false checkout "${_plain_version}" 2>>"$_where"/prepare.log &&           echo "PIN OK (after fetch): checked out ${_plain_version}" | tee -a "$_where"/prepare.log ||           echo "PIN FAIL: could not check out ${_plain_version} -- building origin/HEAD instead" | tee -a "$_where"/prepare.log
+      fi
+      echo "PIN RESULT HEAD: $(git rev-parse HEAD 2>/dev/null)" | tee -a "$_where"/prepare.log
       if [ "$_LOCAL_PRESET" = "valve-exp-bleeding" ]; then
         if [ -z "$_bleeding_tag" ]; then
           _bleeding_tag=$(git tag -l --sort=-v:refname | grep "bleeding" | head -n 1)
