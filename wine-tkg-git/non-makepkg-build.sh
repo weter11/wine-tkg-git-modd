@@ -149,7 +149,10 @@ _src_init() {
     rm -rf "${srcdir}/${_winesrcdir}" && git clone "$_where"/"${_winesrcdir}" "${srcdir}/${_winesrcdir}"
     cd "${srcdir}"/"${_winesrcdir}"
     git -c advice.detachedHead=false checkout --force --no-track -B makepkg origin/HEAD
-    if [ -n "$_plain_version" ] && [ "$_use_staging" != "true" ] || [[ "$_custom_wine_source" = *"ValveSoftware"* ]]; then
+    # Honor _staging_upstreamignore: when set, pin to the exact commit even with
+    # staging enabled (otherwise the &&/|| precedence below drops the checkout
+    # and we silently build origin/HEAD instead of the requested _plain_version).
+    if { [ -n "$_plain_version" ] && { [ "$_use_staging" != "true" ] || [ "$_staging_upstreamignore" = "true" ]; }; } || [[ "$_custom_wine_source" = *"ValveSoftware"* ]]; then
       git -c advice.detachedHead=false checkout "${_plain_version}" 2>>"$_where"/prepare.log
       if [ "$_LOCAL_PRESET" = "valve-exp-bleeding" ]; then
         if [ -z "$_bleeding_tag" ]; then
