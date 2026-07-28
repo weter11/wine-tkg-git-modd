@@ -1,4 +1,4 @@
-name: Proton Valve xbe nopackage Arch Linux CI (zip)
+name:  Proton Valve xbe nopackage Arch Linux CI (zip)
 
 on:
   workflow_dispatch:
@@ -6,85 +6,33 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: archlinux:multilib-devel
 
     steps:
+      - name: Free Disk Space
+        uses: LizardByte/actions/actions/more_space@master
+        with:
+          analyze-space-savings: true
+          clean-all: true
+          safe-packages: "patch,git"
+      - name: Display Analysis
+        run: echo '${{ steps.cleanup.outputs.space-analysis }}'
       - uses: actions/checkout@v7
-
       - name: Compile
         run: |
-          # --- safety net: force --noconfirm on every pacman call, system-wide.
-          # wine-tkg-git/wine-tkg-scripts/deps builds "pacman -S${_confirm_str} --needed"
-          # where _confirm_str is "y" (glued onto -S, becoming -Sy, NOT --noconfirm) or "".
-          # It relies entirely on `yes | ...` feeding stdin. That breaks the moment pacman
-          # needs a NUMBERED provider-choice prompt instead of a Y/n one (e.g. picking
-          # between providers of a virtual package) -- "y" is not a valid number, pacman
-          # reprompts forever, and `yes` never stops sending "y", hanging the runner.
-          cat > /usr/local/bin/pacman <<'PACWRAP'
-          #!/bin/bash
-          exec /usr/bin/pacman --noconfirm "$@"
-          PACWRAP
-          chmod +x /usr/local/bin/pacman
-          export PATH="/usr/local/bin:$PATH"
-
-          # archlinux:multilib-devel ships [multilib] already enabled (unlike
-          # archlinux:latest, which ships it commented out) -- that's why we're on
-          # this image tag instead of hand-editing pacman.conf.
-          pacman -Sy
-
-          pacman -Syu base-devel sudo zip
-          useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown user -R ..
-          chown user -R /tmp
-          export CARGO_HOME="$PWD"
           cd proton-tkg
-
-          # --- Valve Experimental Bleeding Edge wine tree ---
-          printf '_LOCAL_PRESET="valve-exp-bleeding"\n' >> proton-tkg.cfg
-
-          # --- base build settings ---
-          # (gstreamer/ffmpeg media-conversion and wayland support deliberately
-          # left at their defaults -- neither was asked for, and ffmpeg's "jack"
-          # virtual dependency is exactly what triggered the provider-prompt hang.)
           sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
-          sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
-
-          # --- Windows Steam client instead of swapped-in Linux steamclient ---
-          # NOLIB32 stays "false": Valve's trees are always classic split
-          # win32+win64 multilib builds, there is no WoW64 variant to opt into.
-          printf '_steamclient_noswap="true"\n_NOLIB32="false"\n' >> proton-tkg-profiles/advanced-customization.cfg
-
+          sed -i 's/_no_container="true"/_no_container="false"/' proton-tkg.sh
+          printf '_steamclient_noswap="true"\n' >> proton-tkg-profiles/advanced-customization.cfg
           echo '_ci_build="true"' >> proton-tkg.cfg
-
-          # --- quiet the build so the step doesn't get truncated ---
-          export MAKEFLAGS="-s"
-          set -o pipefail
-
-          yes | ./proton-tkg.sh 2>&1 | tee build.log
-
-      - name: Show build errors if it failed
-        if: failure()
-        run: |
-          echo "### Build failure summary" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" proton-tkg/build.log | tail -150 >> "$GITHUB_STEP_SUMMARY" || echo "No matching error lines found, check the full log artifact." >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload full build log
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: proton-tkg-valvexbe-build-log
-          path: proton-tkg/build.log
-
-      - name: Zip the artifact
+          touch tarplz
+          yes|./proton-tkg.sh
+      - name: Package artifact
         run: |
           cd proton-tkg/built
-          zip -r proton-tkg-valvexbe.zip proton_tkg_*
-
+          zip -r proton-tkg-build.zip proton_tkg_*
       - name: Archive the artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: proton-tkg-valvexbe-build
+          name: proton-tkg-build
           path: proton-tkg/built/*.zip
