@@ -28,6 +28,18 @@ jobs:
           export CARGO_HOME="$PWD"
           cd proton-tkg
 
+          # --- Export the proton-build knobs as env vars so they reach BOTH
+          # proton-tkg.sh AND its child non-makepkg-build.sh regardless of which
+          # cfg file each one sources. The cfg sourcing chain is inconsistent
+          # (proton-tkg.sh never reads advanced-customization.cfg; non-makepkg's
+          # dep-install gate reads _NOLIB32 before the wine checkout), so env
+          # propagation is the reliable path.
+          export _NOLIB32="true"
+          export _steamvr_support="false"
+          export _plain_version="7177ece86ca3ab0bd2da0e091c143aa888d856de"
+          export _staging_upstreamignore="true"
+          export _use_staging="false"
+
           # --- master wine (NOT Valve) ---
           sed -i 's/LOCAL_PRESET=""/LOCAL_PRESET="none"/' proton-tkg.cfg
 
