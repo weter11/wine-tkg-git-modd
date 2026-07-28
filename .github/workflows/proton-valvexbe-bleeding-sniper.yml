@@ -46,18 +46,12 @@ jobs:
           export MAKEFLAGS="-s"
           set -o pipefail
 
+          # `yes` gets SIGPIPE (exit 141) when the build finishes and the pipe
+          # closes. With pipefail that would mark the step red even on a good
+          # build, so report proton-tkg.sh's own exit code (PIPESTATUS[1]).
           yes | ./proton-tkg.sh 2>&1 | tee build.log
-
-      - name: Show build errors if it failed
-        if: failure()
-        run: |
-          echo "### Build failure summary" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" \
-            proton-tkg/build.log | tail -150 >> "$GITHUB_STEP_SUMMARY" \
-            || echo "No matching error lines found, check the full log artifact." \
-            >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          build_rc=${PIPESTATUS[1]}
+          exit $build_rc
 
       - name: Upload full build log
         if: always()

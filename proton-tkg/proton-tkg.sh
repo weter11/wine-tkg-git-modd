@@ -878,6 +878,19 @@ function build_in_valve_container {
   if command -v selinuxenabled > /dev/null && selinuxenabled; then
     _configure_flags+=" --relabel-volumes"
   fi
+
+  # Enable the native Wayland driver (not XWayland) for the Proton wine tree.
+  # proton-tkg.sh otherwise never reads _wayland_driver -- that flag is only
+  # consumed by wine-tkg-git/build.sh, which the Proton/Valve path does not use.
+  # Pull it from proton-tkg.cfg so the Valve build can emit winewayland.so.
+  if [ -z "${_wayland_driver}" ] && [ -f "$_nowhere/proton-tkg.cfg" ]; then
+    _wayland_driver="$( . "$_nowhere/proton-tkg.cfg" 2>/dev/null; printf '%s' "$_wayland_driver" )"
+  fi
+  [ -z "${_wayland_driver}" ] && _wayland_driver="false"
+  if [ "$_wayland_driver" = "true" ]; then
+    _configure_flags+=" --with-wayland --with-vulkan"
+  fi
+
   ../configure.sh $_configure_flags
   make redist
   echo "_proton_pkgdest='$_nowhere/external-resources/Proton/build/redist'" >> "$_nowhere"/proton_tkg_token
