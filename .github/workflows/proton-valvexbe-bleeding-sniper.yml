@@ -1,9 +1,4 @@
-Here's the sniper workflow with logging added, and then the WoW64 fix.
-
-## 1. Sniper workflow with logging
-
-```yaml
-name: Proton valvexbe sniper container (zip)
+name:  Proton Valve xbe nopackage Arch Linux CI (zip)
 
 on:
   workflow_dispatch:
