@@ -43,8 +43,14 @@ jobs:
           # via `git merge-base --is-ancestor <commit> HEAD` walking backward from this exact
           # commit; live wine master has drifted past it, so the patch fails to apply and the
           # build continues anyway, then dies later on undefined nice_limit/steamclient_addr.
-          # Remove this line once that patch gets refreshed against current wine HEAD upstream.
-          printf '_plain_version="ea19c0604abe4c8b41e45a8759e4f335c5d0c50d"\n' >> proton-tkg.cfg
+          #
+          # IMPORTANT: _plain_version only actually gets checked out in
+          # wine-tkg-git/non-makepkg-build.sh when _use_staging != "true" (or a Valve
+          # source). _use_staging defaults to "true" in proton-tkg.cfg, which is why
+          # pinning alone previously had zero effect -- the checkout line never ran.
+          # Disabling staging here is the real cost of the pin: you lose wine-staging's
+          # extra compat/visual patches, in exchange for the checkout actually happening.
+          printf '_plain_version="ea19c0604abe4c8b41e45a8759e4f335c5d0c50d"\n_use_staging="false"\n' >> proton-tkg.cfg
 
           # --- base build settings ---
           # (gstreamer/ffmpeg media-conversion and wayland support deliberately
