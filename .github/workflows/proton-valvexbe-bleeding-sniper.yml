@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    container: archlinux:multilib-devel
 
     steps:
       - uses: actions/checkout@v7
@@ -27,10 +27,9 @@ jobs:
           chmod +x /usr/local/bin/pacman
           export PATH="/usr/local/bin:$PATH"
 
-          # archlinux:latest ships [multilib] commented out in pacman.conf.
-          # Valve's tree is always a classic split win32+win64 multilib build
-          # (no WoW64 variant), so lib32-* packages like lib32-attr need this enabled.
-          sed -i '/\[multilib\]/,/Include/s/^#//' /etc/pacman.conf
+          # archlinux:multilib-devel ships [multilib] already enabled (unlike
+          # archlinux:latest, which ships it commented out) -- that's why we're on
+          # this image tag instead of hand-editing pacman.conf.
           pacman -Sy
 
           pacman -Syu base-devel sudo zip
