@@ -1,4 +1,4 @@
-name: Proton master wow64 nopackage Arch Linux CI (zip)
+name: Proton master wow64 CI (zip)
 
 on:
   workflow_dispatch:
