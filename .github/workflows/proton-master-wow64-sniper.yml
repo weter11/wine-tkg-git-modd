@@ -59,6 +59,11 @@ jobs:
           # steam.exe we don't need Proton's steam.exe shim. build_lsteamclient's
           # own win32 branch is already guarded to skip for _NOLIB32="wow64".
           sed -i '/^      build_steamhelper$/d' proton-tkg.sh
+          # build_vrclient needs openvr + winemaker --wine32 (wine32 prefix
+          # absent in container); VR is noted broken upstream and not needed for an
+          # external Windows steam.exe. earlyhotfixer re-sets _steamvr_support=true
+          # during patching, so deleting the call is the reliable skip.
+          sed -i '/^      build_vrclient$/d' proton-tkg.sh
 
           # --- disable wine-staging: the fork's default staging version expects a
           # different wine base than 7177ece8, so staging/patchinstall fails and
