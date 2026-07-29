@@ -21,7 +21,7 @@ jobs:
           chmod +x /usr/local/bin/pacman
           export PATH="/usr/local/bin:$PATH"
 
-          pacman -Syu base-devel sudo zip git mingw-w64-tools
+          pacman -Syu base-devel sudo zip git mingw-w64-widl
           useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown user -R ..
           chown user -R /tmp
