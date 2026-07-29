@@ -53,7 +53,7 @@ jobs:
 
       - name: Configure & Compile Proton-tkg
         run: |
-          sudo -u user bash -c '
+          sudo -u user GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash -c '
             set -eu
             cd "$GITHUB_WORKSPACE/proton-tkg"
 
@@ -67,7 +67,7 @@ jobs:
             export _ci_build="true"
             export MAKEFLAGS="-j$(nproc)"
 
-            # Generate proton-tkg.cfg targeting upstream Wine Master
+            # Create unified proton-tkg.cfg targeting Upstream Wine Master
             cat << "EOF" > proton-tkg.cfg
             _LOCAL_PRESET="none"
             _custom_wine_source="https://gitlab.winehq.org/wine/wine.git"
