@@ -1,4 +1,4 @@
-name: Proton Master WoW64 CI - NO steamclient V2 (zip)
+name: Proton Master WoW64 CI - NO steamclient V2
 
 on:
   workflow_dispatch:
@@ -14,7 +14,6 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # Install base build tools, patch (required for wine-tkg patches), Python, and WoW64 MinGW toolchain
           pacman -Syu --noconfirm --needed \
             base-devel \
             git \
@@ -55,11 +54,11 @@ jobs:
       - name: Configure & Compile Proton-tkg
         run: |
           su user -c '
-            set -euo pipefail
             cd proton-tkg
 
             # Export environment overrides for WoW64 + Upstream Wine Master
             export _NOLIB32="wow64"
+            export _no_steampath="true"
             export _steamvr_support="false"
             export _use_staging="false"
             export _build_gstreamer="false"
@@ -74,6 +73,7 @@ jobs:
             _plain_version=""
             _use_staging="false"
             _NOLIB32="wow64"
+            _no_steampath="true"
             _no_container="true"
             _ci_build="true"
             _steamvr_support="false"
@@ -92,9 +92,11 @@ jobs:
             sed -i "s/.*build_steamhelper.*/# skipped build_steamhelper/" proton-tkg.sh
             sed -i "s/.*build_vrclient.*/# skipped build_vrclient/" proton-tkg.sh
 
-            # Execute build script with pipefail enabled
+            # Execute build script safely capturing PIPESTATUS[1]
             set -o pipefail
-            ./proton-tkg.sh 2>&1 | tee build.log
+            yes | ./proton-tkg.sh 2>&1 | tee build.log
+            build_rc=${PIPESTATUS[1]}
+            exit $build_rc
           '
 
       - name: Show build errors on failure
@@ -114,15 +116,9 @@ jobs:
           name: proton-tkg-master-wow64-nosteam-build-log
           path: proton-tkg/build.log
 
-      - name: Package Artifacts
-        if: success()
-        run: |
-          cd proton-tkg/built
-          zip -r proton-tkg-master-wow64-nosteam.zip proton_tkg_*
-
       - name: Upload Proton Artifact
         if: success()
         uses: actions/upload-artifact@v7
         with:
           name: proton-tkg-master-wow64-nosteam
-          path: proton-tkg/built/
+          path: proton-tkg/built/**
