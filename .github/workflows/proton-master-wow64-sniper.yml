@@ -54,6 +54,10 @@ jobs:
           # in this container and isn't needed for Windows-Steam. _init sources
           # proton-tkg.cfg, so flip the default there.
           sed -i 's/_build_mediaconv="true"/_build_mediaconv="false"/' proton-tkg.cfg
+          # vkd3d-proton needs x86_64-w64-mingw32-widl, provided by mingw-w64-tools,
+          # which is missing from the deps script's arch_pkgs_64. Add it so the
+          # meson cross-build of vkd3d-proton can find widl.
+          sed -i 's/^arch_pkgs_64=(/arch_pkgs_64=(mingw-w64-tools /' wine-tkg-git/wine-tkg-scripts/deps
           sed -i 's/_NOLIB32="false"/_NOLIB32="wow64"/' proton-tkg.sh
 
           # --- VARIANT A (with lsteamclient bridge): keep build_lsteamclient (the
