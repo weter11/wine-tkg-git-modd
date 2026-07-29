@@ -67,12 +67,12 @@ jobs:
           # absent in container); VR is noted broken upstream and not needed for an
           # external Windows steam.exe. earlyhotfixer re-sets _steamvr_support=true
           # during patching, so deleting the call is the reliable skip.
-          sed -i '/^        build_vrclient$/d' proton-tkg.sh
-          # build_vrclient is deleted above; its if-block still does a bare
-          # 'cd Proton' which fails in non-makepkg mode (no local Proton dir).
-          # _steamvr_support is re-set to true by earlyhotfixer, so the block
-          # runs -> remove the stray cd too.
-          sed -i '/^        cd Proton$/d' proton-tkg.sh
+          # Skip the vrclient build block in proton-tkg.sh. earlyhotfixer re-sets
+          # _steamvr_support=true, so the "if [ $_steamvr_support = true ]" block
+          # would run build_vrclient (already deleted) + a bare "cd Proton" that
+          # fails in non-makepkg mode. Flip the condition to "false" so the entire
+          # block (including the bare cd Proton) is skipped, keeping valid syntax.
+          sed -i 's/if \[ \"\$_steamvr_support\" = \"true\" \]; then/if [ "$_steamvr_support" = "false" ]; then/' proton-tkg.sh
 
           # --- disable wine-staging: the fork's default staging version expects a
           # different wine base than 7177ece8, so staging/patchinstall fails and
