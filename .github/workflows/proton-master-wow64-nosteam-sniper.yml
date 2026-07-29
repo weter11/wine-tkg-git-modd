@@ -1,3 +1,22 @@
+# Proton master wine + WoW64, NO steamclient bridge (Variant B), zip packaging.
+# Reworked 2026-07-29:
+#   * Dropped the fabricated `mingw-w64-widl` package (no such package exists on
+#     Arch or elsewhere; the cross widl is `mingw-w64-tools`, AUR-only on Arch).
+#   * Converted from the Arch container to `ubuntu-latest` (no container) so
+#     apt's `mingw-w64` provides `x86_64-w64-mingw32-widl` for the vkd3d-proton
+#     meson cross-build (the same reason the Valve path builds cleanly).
+#   * Stripped the redundant multi-mechanism assignments: each build knob is now
+#     written to its SINGLE authoritative source (see comments per var).
+#   * Kept the legitimate fixes: PIPESTATUS[1] SIGPIPE handling, the 7177ece8 pin,
+#     _NOLIB32=wow64, the vrclient/lsteamclient/steamhelper skips, and the
+#     build_lsteamclient win32 wow64 guard.
+#
+# Verified-against knowledge base: weter11/wine-tkg-git-modd.
+# Variant B = NO bridge: Windows steam.exe is expected to serve steamclient to the
+# game. build_lsteamclient/build_steamhelper are deleted; the win64 lsteamclient
+# .dll.so bridge is NOT produced (so 32-bit-only/bridge-dependent games won't work --
+# that is expected for this variant).
+
 name: Proton master wow64 CI - NO steamclient (zip)
 
 on:
@@ -6,124 +25,93 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: archlinux:latest
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Free Disk Space
+        uses: LizardByte/actions/actions/more_space@master
+        with:
+          analyze-space-savings: true
+          clean-all: true
+          safe-packages: "patch,git"
+
+      - name: Display Analysis
+        run: echo '${{ steps.cleanup.outputs.space-analysis }}'
+
+      - uses: actions/checkout@v4
 
       - name: Compile
         run: |
-          # --- force --noconfirm on every pacman call ---
-          cat > /usr/local/bin/pacman <<'PACWRAP'
-          #!/bin/bash
-          exec /usr/bin/pacman --noconfirm "$@"
-          PACWRAP
-          chmod +x /usr/local/bin/pacman
-          export PATH="/usr/local/bin:$PATH"
-
-          pacman -Syu base-devel sudo zip git mingw-w64-widl
-          useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown user -R ..
-          chown user -R /tmp
-          export CARGO_HOME="$PWD"
           cd proton-tkg
-
-          # --- Export the proton-build knobs as env vars so they reach BOTH
-          # proton-tkg.sh AND its child non-makepkg-build.sh regardless of which
-          # cfg file each one sources. The cfg sourcing chain is inconsistent
-          # (proton-tkg.sh never reads advanced-customization.cfg; non-makepkg's
-          # dep-install gate reads _NOLIB32 before the wine checkout), so env
-          # propagation is the reliable path.
-          export _NOLIB32="wow64"
-          export _steamvr_support="false"
-          export _plain_version="7177ece86ca3ab0bd2da0e091c143aa888d856de"
-          export _staging_upstreamignore="true"
-          export _use_staging="false"
 
           # --- master wine (NOT Valve) ---
           sed -i 's/LOCAL_PRESET=""/LOCAL_PRESET="none"/' proton-tkg.cfg
 
+          # --- base build settings ---
           sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
           sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
 
-          # --- proton-side config: proton-tkg.sh does NOT source advanced-customization.cfg,
-          # so set the proton-build defaults directly here (same pattern as the NOLIB32 sed below).
-          sed -i 's/_steamvr_support="true"/_steamvr_support="false"/' proton-tkg.sh
-          # Disable the Rust mediaconverter/gstreamer build: it fails to build
-          # in this container and isn't needed for Windows-Steam. _init sources
-          # proton-tkg.cfg, so flip the default there.
+          # --- WINE-SIDE config: write to proton-tkg.cfg ONLY. This is the file
+          # prepare.sh (_init) and non-makepkg-build.sh both source first for
+          # _plain_version / _use_staging. (The fork's non-makepkg-build.sh already
+          # honors _plain_version unconditionally, so no script-patch sed needed.) ---
+          # Pin wine to the commit the wow64 steamclient-swap patch was rebased for.
+          printf '_plain_version="7177ece86ca3ab0bd2da0e091c143aa888d856de"\n' >> proton-tkg.cfg
+          # Disable staging: the fork's default _staging_version base mismatches
+          # 7177ece8 and staging/patchinstall fails. Plain 7177ece8 + swap patch is
+          # the proven combination. (_staging_upstreamignore removed: it only gates
+          # prepare.sh's reset, not patchinstall's success, and is redundant once
+          # staging is off.)
+          printf '_use_staging="false"\n' >> proton-tkg.cfg
+          # Disable the Rust mediaconverter/gstreamer build (not needed for
+          # Windows-Steam; it fails to build and leaves gst empty -> later `mv` dies).
           sed -i 's/_build_mediaconv="true"/_build_mediaconv="false"/' proton-tkg.cfg
-          sed -i 's/_NOLIB32="false"/_NOLIB32="wow64"/' proton-tkg.sh
 
-          # --- VARIANT B: do NOT build the steamclient bridge (lsteamclient.so /
-          # steamhelper.so). Use this when Windows steam.exe itself is expected to
-          # provide the steamclient functionality to the game and you do NOT want
-          # Proton's bundled bridge. We delete the build_lsteamclient /
-          # build_steamhelper calls so no 32/64-bit steamclient artifacts are produced.
+          # --- PROTON-SIDE config: sed directly into proton-tkg.sh. proton-tkg.sh
+          # NEVER reads advanced-customization.cfg, so writing these there is a no-op
+          # for the Proton build. These are the single authoritative edits. ---
+          # _NOLIB32="wow64" = Proton-compatible WoW64 (single 64-bit prefix serves
+          # 32-bit games). NOT "true" -- prepare.sh force-reverts "true" to "false",
+          # which then demands lib32-* (absent without multilib) and fails.
+          sed -i 's/_NOLIB32="false"/_NOLIB32="wow64"/' proton-tkg.sh
+          # _steamvr_support="false": VR is noted broken upstream AND build_vrclient
+          # needs the Proton tree (not cloned under _no_container="true").
+          sed -i 's/_steamvr_support="true"/_steamvr_support="false"/' proton-tkg.sh
+
+          # --- VARIANT B: do NOT build the steamclient/steamhelper bridge. Delete
+          # the build calls so no win32/win64 lsteamclient.so / steamhelper.so are
+          # produced. (No _steamclient_noswap: the WoW64 swap selector ignores it and
+          # still applies the wine-internal swap patch, which is required for the
+          # ntdll nice_limit/steamclient_addr symbols the build needs.) ---
           sed -i '/^      build_lsteamclient$/d' proton-tkg.sh
           sed -i '/^      build_steamhelper$/d' proton-tkg.sh
-          # build_vrclient needs openvr + winemaker --wine32 (wine32 prefix
-          # absent in container); VR is noted broken upstream and not needed for an
-          # external Windows steam.exe. earlyhotfixer re-sets _steamvr_support=true
-          # during patching, so deleting the call is the reliable skip.
-          # Skip the vrclient build block in proton-tkg.sh. earlyhotfixer re-sets
-          # _steamvr_support=true, so the "if [ $_steamvr_support = true ]" block
-          # would run build_vrclient (already deleted) + a bare "cd Proton" that
-          # fails in non-makepkg mode. Flip the condition to "false" so the entire
-          # block (including the bare cd Proton) is skipped, keeping valid syntax.
-          sed -i 's/if \[ \"\$_steamvr_support\" = \"true\" \]; then/if [ "$_steamvr_support" = "false" ]; then/' proton-tkg.sh
+          # earlyhotfixer re-sets _steamvr_support="true" during patching, so the
+          # vrclient `if` block would still run (already-deleted build_vrclient) + a
+          # bare `cd Proton` that fails in non-makepkg mode. Flip the condition to
+          # false so the WHOLE block (build_vrclient + stray cd Proton) is skipped,
+          # preserving valid syntax and the legitimate clone-section cd Proton calls.
+          sed -i 's/if \[ "\$_steamvr_support" = "true" \]; then/if [ "$_steamvr_support" = "false" ]; then/' proton-tkg.sh
 
-          # --- disable wine-staging: the fork's default staging version expects a
-          # different wine base than 7177ece8, so staging/patchinstall fails and
-          # shifts the context the swap patch needs. The swap patch is proven to
-          # apply cleanly on plain 7177ece8 without staging; staging compat fixes
-          # can be re-pinned later once a matching staging version is chosen.
-          printf '_use_staging="false"\n' >> proton-tkg.cfg
-
-          # --- pin to the commit the rebased swap patch targets ---
-          printf '_plain_version="7177ece86ca3ab0bd2da0e091c143aa888d856de"\n' >> proton-tkg.cfg
-
-          # --- make the commit pin actually land ---
-          # PKGBUILD / non-makepkg only emit #commit= (vs origin/HEAD) when _use_staging
-          # is false OR (_use_staging=true AND _staging_upstreamignore=true). The fork
-          # defaults to _use_staging=true, so without this the build silently uses
-          # origin/HEAD (master) and the 7177ece8-rebased swap patch fails to apply.
-          # Write it to BOTH proton-tkg.cfg (sourced first in _init) and
-          # advanced-customization.cfg to remove any sourcing-path ambiguity.
-          printf '_staging_upstreamignore="true"\n' >> proton-tkg.cfg
-          printf '_staging_upstreamignore="true"\n' \
-            >> proton-tkg-profiles/advanced-customization.cfg
-
-          # --- debug: confirm the workflow actually set the pin vars ---
-          echo "DEBUG workflow vars: _plain_version=$(grep -m1 _plain_version proton-tkg.cfg | tail -1) _staging_upstreamignore=$(grep -m1 _staging_upstreamignore proton-tkg.cfg | tail -1) proton _steamvr_support=$(grep -m1 _steamvr_support proton-tkg.sh | tail -1) proton _NOLIB32=$(grep -m1 _NOLIB32 proton-tkg.sh | tail -1)"
-
-          # --- _NOLIB32="wow64": Proton-compatible WoW64. Proton builds forbid pure
-          # _NOLIB32="true" (prepare.sh forces it back to false), so wow64 is the mode
-          # that skips 32-bit dep install AND serves 32-bit games via the 64-bit prefix.
-          # The 32-bit lsteamclient build is skipped (no wine32 prefix); 64-bit Windows
-          # Steam + DX12 games use the win64 lsteamclient.dll.so bridge. ---
-          # VR support is broken and pulls in a winemaker/openvr step that needs the
-          # Proton tree (not cloned under _no_container="true") -> disable it.
-          printf '_NOLIB32="wow64"\n_steamvr_support="false"\n' \
-            >> proton-tkg-profiles/advanced-customization.cfg
-
-          # --- Wow64 workaround: lsteamclient/steamhelper do native winegcc -m32
-          # under NOLIB32="wow64" (they only special-case "true"). In this NO-bridge
-          # variant the build calls are removed above, so this guard is belt-and-suspenders.
+          # --- Wow64 guard: build_lsteamclient/steamhelper do native winegcc -m32
+          # under NOLIB32="wow64" (they only special-case "true"). Belt-and-suspenders
+          # now that the calls are deleted, but it is the canonical wow64 fix and is
+          # harmless. (Skips the win32 branch; the win64 bridge is already gone via the
+          # deletes above.) ---
           sed -i 's/if \[ "\$_NOLIB32" != "true" \]; then/if [ "$_NOLIB32" != "true" ] \&\& [ "$_NOLIB32" != "wow64" ]; then/' proton-tkg.sh
 
+          # --- PROBE: confirm the single-source edits actually landed (cheap insurance) ---
+          echo "PROBE: $(grep -m1 _NOLIB32 proton-tkg.sh | tail -1) | $(grep -m1 _steamvr_support proton-tkg.sh | tail -1) | $(grep -m1 _plain_version proton-tkg.cfg | tail -1) | $(grep -m1 _use_staging proton-tkg.cfg | tail -1)"
+
           echo '_ci_build="true"' >> proton-tkg.cfg
+          touch tarplz
 
           export MAKEFLAGS="-s"
           set +e
 
-          # yes feeds any (rare) interactive prompt; tee captures full output.
-          # We deliberately do NOT use `set -o pipefail`: that would make the
-          # pipeline report yes's SIGPIPE (141) when the build finishes and the
-          # pipe closes. Without pipefail the pipeline returns tee's status (0),
-          # so `set -e` won't abort and we can read proton-tkg.sh's own exit via
-          # PIPESTATUS[1]. set +e guards the call so the real exit is captured.
+          # `yes` feeds any rare interactive prompt; tee captures full output.
+          # Without `set -o pipefail` the pipeline reports tee's status (0);
+          # `yes` dying of SIGPIPE (141) on the closed pipe is ignored. We capture
+          # proton-tkg.sh's own exit via PIPESTATUS[1] and return that.
           yes | ./proton-tkg.sh 2>&1 | tee build.log
           build_rc=${PIPESTATUS[1]}
           set -e
@@ -142,7 +130,7 @@ jobs:
 
       - name: Upload full build log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: proton-tkg-master-wow64-nosteam-build-log
           path: proton-tkg/build.log
@@ -153,7 +141,7 @@ jobs:
           zip -r proton-tkg-master-wow64-nosteam.zip proton_tkg_*
 
       - name: Archive the artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: proton-tkg-master-wow64-nosteam
           path: proton-tkg/built/*.zip
