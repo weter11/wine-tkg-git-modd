@@ -44,13 +44,17 @@ jobs:
           touch tarplz
 
           export MAKEFLAGS="-s"
+          set +e
 
-          # Run proton-tkg.sh directly (CI mode, _ci_build=true, needs no yes
-          # prompts). Redirect output to build.log and report its true exit
-          # code. The previous yes|...|tee+pipefail approach let yes's SIGPIPE
-          # (141) leak into the step result even on a successful build.
-          ./proton-tkg.sh > build.log 2>&1
-          build_rc=$?
+          # yes feeds any (rare) interactive prompt; tee captures full output.
+          # We deliberately do NOT use `set -o pipefail`: that would make the
+          # pipeline report yes's SIGPIPE (141) when the build finishes and the
+          # pipe closes. Without pipefail the pipeline returns tee's status (0),
+          # so `set -e` won't abort and we can read proton-tkg.sh's own exit via
+          # PIPESTATUS[1]. set +e guards the call so the real exit is captured.
+          yes | ./proton-tkg.sh 2>&1 | tee build.log
+          build_rc=${PIPESTATUS[1]}
+          set -e
           exit $build_rc
 
       - name: Upload full build log
