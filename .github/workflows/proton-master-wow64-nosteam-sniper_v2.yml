@@ -47,18 +47,19 @@ jobs:
             wayland-protocols \
             mingw-w64-gcc
 
-          # Setup non-root build user
+          # Setup non-root build user and transfer workspace ownership
           useradd -m user && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown -R user:user . /tmp
+          chown -R user:user "$GITHUB_WORKSPACE" /tmp
 
       - name: Configure & Compile Proton-tkg
         run: |
-          su user -c '
-            cd proton-tkg
+          sudo -u user bash -c '
+            set -eu
+            cd "$GITHUB_WORKSPACE/proton-tkg"
 
-            # Export environment overrides for WoW64 + Upstream Wine Master
+            # Export environment variables - MUST use "y" for _no_steampath
             export _NOLIB32="wow64"
-            export _no_steampath="true"
+            export _no_steampath="y"
             export _steamvr_support="false"
             export _use_staging="false"
             export _build_gstreamer="false"
@@ -66,14 +67,14 @@ jobs:
             export _ci_build="true"
             export MAKEFLAGS="-j$(nproc)"
 
-            # Create unified proton-tkg.cfg targeting Upstream Wine Master
+            # Generate proton-tkg.cfg targeting upstream Wine Master
             cat << "EOF" > proton-tkg.cfg
             _LOCAL_PRESET="none"
             _custom_wine_source="https://gitlab.winehq.org/wine/wine.git"
             _plain_version=""
             _use_staging="false"
             _NOLIB32="wow64"
-            _no_steampath="true"
+            _no_steampath="y"
             _no_container="true"
             _ci_build="true"
             _steamvr_support="false"
@@ -92,7 +93,7 @@ jobs:
             sed -i "s/.*build_steamhelper.*/# skipped build_steamhelper/" proton-tkg.sh
             sed -i "s/.*build_vrclient.*/# skipped build_vrclient/" proton-tkg.sh
 
-            # Execute build script safely capturing PIPESTATUS[1]
+            # Execute build and log stdout/stderr
             set -o pipefail
             yes | ./proton-tkg.sh 2>&1 | tee build.log
             build_rc=${PIPESTATUS[1]}
