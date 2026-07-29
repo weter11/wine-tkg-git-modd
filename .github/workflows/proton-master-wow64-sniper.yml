@@ -50,6 +50,10 @@ jobs:
           # --- proton-side config: proton-tkg.sh does NOT source advanced-customization.cfg,
           # so set the proton-build defaults directly here (same pattern as the NOLIB32 sed below).
           sed -i 's/_steamvr_support="true"/_steamvr_support="false"/' proton-tkg.sh
+          # Disable the Rust mediaconverter/gstreamer build: it fails to build
+          # in this container and isn't needed for Windows-Steam. _init sources
+          # proton-tkg.cfg, so flip the default there.
+          sed -i 's/_build_mediaconv="true"/_build_mediaconv="false"/' proton-tkg.cfg
           sed -i 's/_NOLIB32="false"/_NOLIB32="wow64"/' proton-tkg.sh
 
           # --- VARIANT A (with lsteamclient bridge): keep build_lsteamclient (the
