@@ -110,13 +110,13 @@ jobs:
           echo '_ci_build="true"' >> proton-tkg.cfg
 
           export MAKEFLAGS="-s"
-          set -o pipefail
 
-          # `yes` gets SIGPIPE (exit 141) when the build finishes and the pipe
-          # closes. With pipefail that would mark the step red even on a good
-          # build, so report proton-tkg.sh's own exit code (PIPESTATUS[1]).
-          yes | ./proton-tkg.sh 2>&1 | tee build.log
-          build_rc=${PIPESTATUS[1]}
+          # Run proton-tkg.sh directly (CI mode, _ci_build=true, needs no yes
+          # prompts). Redirect output to build.log and report its true exit
+          # code. The previous yes|...|tee+pipefail approach let yes's SIGPIPE
+          # (141) leak into the step result even on a successful build.
+          ./proton-tkg.sh > build.log 2>&1
+          build_rc=$?
           exit $build_rc
 
       - name: Show build errors if it failed
