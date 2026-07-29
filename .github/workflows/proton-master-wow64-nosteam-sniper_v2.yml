@@ -46,7 +46,6 @@ jobs:
             wayland \
             wayland-protocols \
             mingw-w64-gcc
-
           # Setup non-root build user and transfer workspace ownership
           useradd -m user && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown -R user:user "$GITHUB_WORKSPACE" /tmp
@@ -67,31 +66,47 @@ jobs:
             export _ci_build="true"
             export MAKEFLAGS="-j$(nproc)"
 
-            # Create unified proton-tkg.cfg targeting Upstream Wine Master
-            cat << "EOF" > proton-tkg.cfg
-            _LOCAL_PRESET="none"
-            _custom_wine_source="https://gitlab.winehq.org/wine/wine.git"
-            _plain_version=""
-            _use_staging="false"
-            _NOLIB32="wow64"
-            _no_steampath="y"
-            _no_container="true"
-            _ci_build="true"
-            _steamvr_support="false"
-            _build_gstreamer="false"
-            _build_mediaconv="false"
-            uninstaller="true"
-            autoinstall="true"
-            EOF
+            # Create unified proton-tkg.cfg targeting upstream Wine master.
+            # printf instead of a heredoc: a heredoc terminator must sit at
+            # column zero with zero leading whitespace, which is easy to break
+            # by accident inside an indented YAML block scalar wrapped in a
+            # quoted bash -c string -- if it breaks, bash keeps consuming every
+            # following line as literal file content instead of executing it,
+            # silently skipping the rest of the script with no error.
+            {
+              printf "%s\n" "_LOCAL_PRESET=\"none\""
+              printf "%s\n" "_custom_wine_source=\"https://gitlab.winehq.org/wine/wine.git\""
+              printf "%s\n" "_plain_version=\"\""
+              printf "%s\n" "_use_staging=\"false\""
+              printf "%s\n" "_NOLIB32=\"wow64\""
+              printf "%s\n" "_no_steampath=\"y\""
+              printf "%s\n" "_no_container=\"true\""
+              printf "%s\n" "_ci_build=\"true\""
+              printf "%s\n" "_steamvr_support=\"false\""
+              printf "%s\n" "_build_gstreamer=\"false\""
+              printf "%s\n" "_build_mediaconv=\"false\""
+              printf "%s\n" "uninstaller=\"true\""
+              printf "%s\n" "autoinstall=\"true\""
+            } > proton-tkg.cfg
 
             # Mirror configuration to advanced-customization.cfg
             mkdir -p proton-tkg-profiles
             cp proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg
 
-            # Stub out Linux Steam bridge and VR builds
-            sed -i "s/.*build_lsteamclient.*/# skipped build_lsteamclient/" proton-tkg.sh
-            sed -i "s/.*build_steamhelper.*/# skipped build_steamhelper/" proton-tkg.sh
-            sed -i "s/.*build_vrclient.*/# skipped build_vrclient/" proton-tkg.sh
+            # Stub out only the actual call sites (proton-tkg.sh line ~1114 and
+            # ~1117), not every line mentioning these names. A broad
+            # s/.*build_lsteamclient.*/.../ also matches the function
+            # DEFINITION line ("function build_lsteamclient {"), which would
+            # comment out the opening brace and leave the whole function body
+            # as orphaned top-level code that either fails to parse or runs
+            # unconditionally at script load. Anchoring to the exact
+            # 6-space-indented bare call line avoids that entirely.
+            # build_vrclient needs no sed at all: its only call site is already
+            # gated by "if [ \"$_steamvr_support\" = \"true\" ]", and nothing
+            # later in the script resets that flag, so _steamvr_support="false"
+            # above already skips it cleanly.
+            sed -i "/^      build_lsteamclient\$/d" proton-tkg.sh
+            sed -i "/^      build_steamhelper\$/d" proton-tkg.sh
 
             # Execute build and log stdout/stderr
             set -o pipefail
