@@ -14,12 +14,20 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # Install base build tools, Vulkan/Wayland headers, and MinGW for WoW64 PE target generation
+          # Install base build tools, patch (required for wine-tkg patches), Python, and WoW64 MinGW toolchain
           pacman -Syu --noconfirm --needed \
             base-devel \
             git \
             sudo \
             zip \
+            patch \
+            python \
+            rsync \
+            wget \
+            curl \
+            pkgconf \
+            cmake \
+            ninja \
             bison \
             flex \
             fontconfig \
@@ -50,7 +58,7 @@ jobs:
             set -euo pipefail
             cd proton-tkg
 
-            # Export global environment overrides
+            # Export environment overrides for WoW64 + Upstream Wine Master
             export _NOLIB32="wow64"
             export _steamvr_support="false"
             export _use_staging="false"
@@ -75,16 +83,17 @@ jobs:
             autoinstall="true"
             EOF
 
-            # Mirror configuration to advanced-customization.cfg to remove sourcing gaps
+            # Mirror configuration to advanced-customization.cfg
             mkdir -p proton-tkg-profiles
             cp proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg
 
-            # Stub out Linux Steam bridge and VR builds (Windows Steam runs natively inside prefix)
+            # Stub out Linux Steam bridge and VR builds
             sed -i "s/.*build_lsteamclient.*/# skipped build_lsteamclient/" proton-tkg.sh
             sed -i "s/.*build_steamhelper.*/# skipped build_steamhelper/" proton-tkg.sh
             sed -i "s/.*build_vrclient.*/# skipped build_vrclient/" proton-tkg.sh
 
-            # Run build script
+            # Execute build script with pipefail enabled
+            set -o pipefail
             ./proton-tkg.sh 2>&1 | tee build.log
           '
 
@@ -105,15 +114,9 @@ jobs:
           name: proton-tkg-master-wow64-nosteam-build-log
           path: proton-tkg/build.log
 
-      - name: Package Artifacts
-        if: success()
-        run: |
-          cd proton-tkg/built
-          zip -r proton-tkg-master-wow64-nosteam.zip proton_tkg_*
-
       - name: Upload Proton Artifact
         if: success()
         uses: actions/upload-artifact@v7
         with:
           name: proton-tkg-master-wow64-nosteam
-          path: proton-tkg/built/proton-tkg-master-wow64-nosteam.zip
+          path: proton-tkg/built/
