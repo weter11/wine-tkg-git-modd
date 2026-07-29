@@ -303,6 +303,14 @@ function build_lsteamclient {
   cp -a lsteamclient/* build/lsteamclient.win64
   cp -a lsteamclient/* build/lsteamclient.win32
 
+  # The lsteamclient manual .c files use TRACE/ERR (wine/debug.h macros) but do
+  # not include the header; they compile fine against Proton's own wine but fail
+  # against plain wine (implicit declaration). Inject the include so winemaker's
+  # generated Makefile (which overrides env CFLAGS) still sees the macros.
+  for _f in build/lsteamclient.win64/*.c build/lsteamclient.win32/*.c; do
+    grep -q "#include <wine/debug.h>" "$_f" 2>/dev/null || sed -i "1i #include <wine/debug.h>" "$_f"
+  done
+
   cd build/lsteamclient.win64
   winemaker $WINEMAKERFLAGS --dll -DSTEAM_API_EXPORTS -Dprivate=public -Dprotected=public .
   sed -re 's@_LDFLAGS=@_LDFLAGS= -static-libgcc -static-libstdc++ -ldl @' -i "$_nowhere/Proton/build/lsteamclient.win64/Makefile"
