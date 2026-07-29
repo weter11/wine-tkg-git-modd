@@ -33,7 +33,8 @@ jobs:
             libxcomposite \
             libxi \
             libxcursor \
-            libvulkan \
+            vulkan-icd-loader \
+            vulkan-headers \
             mesa \
             wayland \
             wayland-protocols \
