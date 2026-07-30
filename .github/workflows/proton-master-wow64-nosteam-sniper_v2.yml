@@ -76,7 +76,7 @@ jobs:
             {
               printf "%s\n" "_LOCAL_PRESET=\"none\""
               printf "%s\n" "_custom_wine_source=\"https://gitlab.winehq.org/wine/wine.git\""
-              printf "%s\n" "_plain_version=\"ea19c0604abe4c8b41e45a8759e4f335c5d0c50d\""
+              printf "%s\n" "_plain_version=\"03277f2f770aebe35c09a73a29be6abb8b47b3c2\""
               printf "%s\n" "_use_staging=\"false\""
               printf "%s\n" "_NOLIB32=\"wow64\""
               printf "%s\n" "_no_steampath=\"y\""
