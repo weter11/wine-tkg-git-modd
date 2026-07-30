@@ -66,6 +66,16 @@ jobs:
             export _ci_build="true"
             export MAKEFLAGS="-j$(nproc)"
 
+            # GCC 14 made -Wimplicit-function-declaration (and -Wimplicit-int)
+            # hard errors by default for C, where older GCC only warned. This
+            # pinned wine commit predates that GCC policy change, so any call
+            # site relying on an implicit declaration -- previously harmless --
+            # now fails the build. Downgrading back to a warning here is the
+            # same fix used by other projects hitting this after a toolchain
+            # bump (e.g. u-boot), and applies across the whole build via CFLAGS
+            # rather than needing a patch at every individual call site.
+            export CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
+
             # Create unified proton-tkg.cfg targeting upstream Wine master.
             # printf instead of a heredoc: a heredoc terminator must sit at
             # column zero with zero leading whitespace, which is easy to break
