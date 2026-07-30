@@ -1,0 +1,183 @@
+name: SteamFlow Runner WoW64 Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      wine_commit:
+        description: "Wine commit hash to build (empty = HEAD)"
+        required: false
+        type: string
+      dxvk_version:
+        description: "DXVK version tag (empty = latest)"
+        required: false
+        type: string
+      vkd3d_version:
+        description: "VKD3D-Proton version tag (empty = latest)"
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: Build SteamFlow Runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    container:
+      image: archlinux:latest
+      options: --user root
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          # System-wide pacman wrapper to prevent hanging on numbered provider prompts
+          mv /usr/bin/pacman /usr/bin/pacman.real
+          cat > /usr/bin/pacman <<'PACWRAP'
+          #!/bin/bash
+          exec /usr/bin/pacman.real --noconfirm "$@"
+          PACWRAP
+          chmod +x /usr/bin/pacman
+
+          pacman -Syu --needed \
+            base-devel \
+            git \
+            sudo \
+            zip \
+            patch \
+            python \
+            python-fonttools \
+            fontforge \
+            rsync \
+            wget \
+            curl \
+            pkgconf \
+            cmake \
+            ninja \
+            bison \
+            flex \
+            fontconfig \
+            freetype2 \
+            gnutls \
+            libx11 \
+            libxext \
+            libxinerama \
+            libxrandr \
+            libxrender \
+            libxcomposite \
+            libxi \
+            libxcursor \
+            vulkan-icd-loader \
+            vulkan-headers \
+            mesa \
+            wayland \
+            wayland-protocols \
+            mingw-w64-gcc \
+            zstd \
+            opencl-headers \
+            ocl-icd \
+            libpcap \
+            libpulse \
+            alsa-lib \
+            libva \
+            libvdpau \
+            sdl2 \
+            gst-plugins-base \
+            gst-plugins-good \
+            gst-plugins-bad \
+            gst-plugins-ugly \
+            gst-libav \
+            orc \
+            samba \
+            openal \
+            libgphoto2 \
+            v4l-utils \
+            sane \
+            cups \
+            libxslt \
+            docbook-xsl \
+            libxml2 \
+            python-lxml
+
+          # Setup non-root build user with full sudo privileges
+          useradd -m user
+          echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R user:user "$GITHUB_WORKSPACE" /tmp
+
+      - name: Configure build environment
+        run: |
+          # Write build config with any workflow dispatch inputs
+          cat > "$GITHUB_WORKSPACE/build-config.env" <<ENVCFG
+          export WINE_COMMIT="${{ github.event.inputs.wine_commit }}"
+          export DXVK_VERSION="${{ github.event.inputs.dxvk_version }}"
+          export VKD3D_VERSION="${{ github.event.inputs.vkd3d_version }}"
+          ENVCFG
+
+      - name: Build SteamFlow Runner
+        env:
+          WINE_COMMIT: ${{ github.event.inputs.wine_commit }}
+          DXVK_VERSION: ${{ github.event.inputs.dxvk_version }}
+          VKD3D_VERSION: ${{ github.event.inputs.vkd3d_version }}
+        run: |
+          sudo -u user bash -c '
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE"
+            source build-config.env 2>/dev/null || true
+            
+            # GCC 14 compatibility flags
+            export CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
+            export CXXFLAGS="${CFLAGS} -Wno-error=attributes"
+            export MAKEFLAGS="-j$(nproc)"
+            
+            # Run the build script
+            ./build-steamflow-runner.sh 2>&1 | tee build.log
+            exit ${PIPESTATUS[0]}
+          '
+
+      - name: Show Wine commit used
+        if: always()
+        run: |
+          echo "### Wine commit used" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_WORKSPACE/build/wine_commit.txt" 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || echo "Not found" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show build errors on failure
+        if: failure()
+        run: |
+          echo "### Build Failure Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" \
+            "$GITHUB_WORKSPACE/build.log" | tail -150 >> "$GITHUB_STEP_SUMMARY" \
+            || echo "No matching error lines found." >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: steamflow-runner-build-log
+          path: |
+            build.log
+            build/wine_commit.txt
+            dist/steamflow-runner/MANIFEST.txt
+          retention-days: 7
+
+      - name: Upload SteamFlow Runner artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: steamflow-runner-wine11-wow64
+          path: steamflow-runner-wine11-wow64.tar.gz
+          retention-days: 30
+
+      - name: Create release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/') && success()
+        uses: softprops/action-gh-release@v2
+        with:
+          files: steamflow-runner-wine11-wow64.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
