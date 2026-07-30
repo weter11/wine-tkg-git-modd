@@ -50,27 +50,30 @@ jobs:
         run: |
           cd proton-tkg
 
-          # 1. Non-interactive flags & WoW64 checks in proton-tkg.sh
+          # 1. Set non-interactive flags and WoW64 guard in proton-tkg.sh
           sed -i 's/_no_steampath="false"/_no_steampath="y"/' proton-tkg.sh
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
           sed -i 's/if \[ "\$_NOLIB32" != "true" \]; then/if [ "$_NOLIB32" != "true" ] \&\& [ "$_NOLIB32" != "wow64" ]; then/g' proton-tkg.sh
 
-          # 2. Stub out unused build functions at entry (return 0 instantly)
+          # 2. Stub out unused build functions (return 0 instantly)
           sed -i 's/^function build_lsteamclient {/function build_lsteamclient { return 0;/' proton-tkg.sh
           sed -i 's/^function build_steamhelper {/function build_steamhelper { return 0;/' proton-tkg.sh
           sed -i 's/^function build_vrclient {/function build_vrclient { return 0;/' proton-tkg.sh
           sed -i 's/^function build_mediaconverter {/function build_mediaconverter { return 0;/' proton-tkg.sh
 
-          # 3. Replace GST strip/mv calls with `true` to preserve valid Bash syntax in then...fi blocks
+          # 3. Prevent GStreamer post-build move failures while maintaining valid Bash syntax
           sed -i 's|strip --strip-unneeded "$_nowhere"/gst.*|true|g' proton-tkg.sh
           sed -i 's|mv "$_nowhere"/gst.*|true|g' proton-tkg.sh
 
-          # 4. Generate proton-tkg.cfg targeting upstream Wine Master
+          # 4. Generate proton-tkg.cfg targeting upstream Wine Master without Protonify patches
           cat << "EOF" > proton-tkg.cfg
           _LOCAL_PRESET="none"
           _custom_wine_source="https://gitlab.winehq.org/wine/wine.git"
           _plain_version=""
           _use_staging="false"
+          _protonify="false"
+          _proton_use_steamhelper="false"
+          _proton_fsync="false"
           _NOLIB32="wow64"
           _no_steampath="y"
           _no_container="true"
