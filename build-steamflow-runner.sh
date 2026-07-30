@@ -177,12 +177,14 @@ fetch_fonts() {
     step "Fetching Liberation Fonts"
     local dest="${DIST_DIR}/share/fonts"
     mkdir -p "${dest}" "${BUILD_DIR}/fonts"
-    if [[ -d /usr/share/fonts/liberation ]]; then
-        log "Using system Liberation fonts"
-        cp -v /usr/share/fonts/liberation/*.ttf "${dest}/" 2>&1 | tee -a "${BUILD_LOG}"
+    
+    # Check if system Liberation fonts exist (installed via pacman ttf-liberation)
+    if find /usr/share/fonts -iname "Liberation*.ttf" -print -quit | grep -q .; then
+        log "Using system Liberation fonts from pacman..."
+        find /usr/share/fonts -iname "Liberation*.ttf" -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}"
     else
-        log "Downloading Liberation Fonts..."
-        local url="https://github.com/liberationfonts/liberation-fonts/files/5931818/liberation-fonts-ttf-2.1.5.tar.gz"
+        log "Downloading Liberation Fonts fallback..."
+        local url="https://github.com/liberationfonts/liberation-fonts/releases/download/2.1.5/liberation-fonts-ttf-2.1.5.tar.gz"
         local tarball="${BUILD_DIR}/fonts/liberation-fonts.tar.gz"
         download "${url}" "${tarball}"
         tar -xzf "${tarball}" -C "${BUILD_DIR}/fonts" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
