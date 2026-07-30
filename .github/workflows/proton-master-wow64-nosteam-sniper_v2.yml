@@ -14,6 +14,32 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          # Force --noconfirm on every pacman call, system-wide, for the rest
+          # of the job -- including the later "Configure & Compile" step,
+          # which runs via `sudo -u user bash -c ...`. sudo often applies its
+          # own secure_path rather than the inherited $PATH, so a wrapper
+          # placed only at /usr/local/bin might not be found from inside that
+          # sudo context even though it works here. Replacing the real binary
+          # at its canonical /usr/bin/pacman path sidesteps that entirely.
+          #
+          # This exists because proton-tkg's own internal dependency
+          # installer (wine-tkg-git/wine-tkg-scripts/deps, function
+          # _install_pkg) calls bare "pacman -S${_confirm_str} --needed" with
+          # no --noconfirm, relying entirely on `yes` feeding stdin. That
+          # breaks the moment pacman needs a NUMBERED provider-choice prompt
+          # (e.g. picking between providers of a virtual package like "jack")
+          # instead of a Y/n one -- "y" is not a valid number, pacman
+          # reprompts forever, and `yes` never stops sending "y", hanging the
+          # runner. This hit us once before on the Valve workflow; it is back
+          # here because this file was rewritten from scratch and the fix did
+          # not carry over.
+          mv /usr/bin/pacman /usr/bin/pacman.real
+          cat > /usr/bin/pacman <<'PACWRAP'
+          #!/bin/bash
+          exec /usr/bin/pacman.real --noconfirm "$@"
+          PACWRAP
+          chmod +x /usr/bin/pacman
+
           pacman -Syu --noconfirm --needed \
             base-devel \
             git \
