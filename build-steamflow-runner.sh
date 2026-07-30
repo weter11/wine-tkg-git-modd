@@ -4,36 +4,39 @@
 
 set -euo pipefail
 
+# Fixed root workspace directory
+ROOT_DIR="${PWD}"
+
 # ============================================================================================
 # VERSION PINS - Update these for component version bumps
 # ============================================================================================
 WINE_GIT_URL="https://gitlab.winehq.org/wine/wine.git"
-WINE_COMMIT=""  # Empty = HEAD (master). Pin to a commit hash like "7177ece8" if needed.
+WINE_COMMIT="${WINE_COMMIT:-}"  # Empty = HEAD (master)
 
-# Component versions (empty = latest release from GitHub API)
-DXVK_VERSION=""
-VKD3D_VERSION=""
-WINE_MONO_VERSION=""
-WINE_GECKO_VERSION=""
+DXVK_VERSION="${DXVK_VERSION:-}"
+VKD3D_VERSION="${VKD3D_VERSION:-}"
+WINE_MONO_VERSION="${WINE_MONO_VERSION:-}"
+WINE_GECKO_VERSION="${WINE_GECKO_VERSION:-}"
 
 # ============================================================================================
 # BUILD CONFIGURATION
 # ============================================================================================
-BUILD_DIR="${PWD}/build"
-DIST_DIR="${PWD}/dist/steamflow-runner"
+BUILD_DIR="${ROOT_DIR}/build"
+DIST_DIR="${ROOT_DIR}/dist/steamflow-runner"
 WINE_SRC_DIR="${BUILD_DIR}/wine-git"
 BUILD_LOG="${BUILD_DIR}/build.log"
+WINE_TKG_DIR="${ROOT_DIR}/wine-tkg-git"
 
-# Wine build config (aligned with wine-tkg non-makepkg path)
-export _NOLIB32="wow64"           # Pure WoW64 - 32-bit Windows apps via Wine's built-in WoW64
-export _use_staging="false"        # No staging patches (pure master)
-export _unfrog="true"              # Disable Frog/Proton patches (Linux bridge)
-export _protonify="true"           # Proton game compatibility patches (minus bridge bits)
-export _proton_fsync="true"        # Fsync support
-export _wayland_driver="true"      # Wayland + Vulkan
-export _proton_use_steamhelper="false"  # No Linux steamhelper
-export _steamvr_support="false"    # No SteamVR
-export _no_container="true"        # No Valve container
+# Wine build config
+export _NOLIB32="wow64"
+export _use_staging="false"
+export _unfrog="true"
+export _protonify="true"
+export _proton_fsync="true"
+export _wayland_driver="true"
+export _proton_use_steamhelper="false"
+export _steamvr_support="false"
+export _no_container="true"
 export _ci_build="true"
 export _nomakepkg_dependency_autoresolver="true"
 export _nomakepkg_prefix_path="${DIST_DIR}"
@@ -58,7 +61,6 @@ export _use_ntsync="false"
 export _use_esync="false"
 export _use_fsync="false"
 export _steamclient_noswap="false"
-export _proton_branch="experimental_11.0"
 
 # GCC 14 compatibility flags
 export CFLAGS="-O2 -pipe -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -fno-strict-aliasing"
@@ -87,23 +89,27 @@ download() {
 }
 
 download_github_latest() {
-    local repo="$1" pattern="$2" dest_dir="$3" dest_file="${4:-}"
-    local api_url="https://api.github.com/repos/${repo}/releases/latest"
-    log "Fetching latest release from ${repo}..."
+    local repo="$1" pattern="$2" dest_dir="$3" dest_file="${4:-}" tag="${5:-}"
+    log "Fetching release info for ${repo}..."
     local asset_url
-    asset_url=$(curl -fLs "${api_url}" | grep -Eo '"browser_download_url":\s*"[^"]*'"${pattern}"'[^"]*"' | head -1 | sed 's/.*"browser_download_url":\s*"\([^"]*\)".*/\1/') || true
+    asset_url=$(python3 -c "
+import urllib.request, json, re
+tag = '${tag}'
+url = f'https://api.github.com/repos/${repo}/releases/' + (f'tags/{tag}' if tag else 'latest')
+req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+try:
+    with urllib.request.urlopen(req) as response:
+        data = json.loads(response.read().decode())
+        pattern = re.compile(r'${pattern}')
+        for asset in data.get('assets', []):
+            if pattern.search(asset['name']):
+                print(asset['browser_download_url'])
+                break
+except Exception as e:
+    pass
+")
     if [[ -z "${asset_url}" ]]; then
-        warn "Could not auto-detect ${pattern} from ${repo}, trying common patterns..."
-        # Fallback: try to construct from tag name
-        local tag_name
-        tag_name=$(curl -fLs "${api_url}" | grep -Eo '"tag_name":\s*"[^"]*"' | head -1 | sed 's/.*"tag_name":\s*"\([^"]*\)".*/\1/') || true
-        if [[ -n "${tag_name}" ]]; then
-            asset_url="https://github.com/${repo}/releases/download/${tag_name}/$(echo ${pattern} | sed 's/.*\*//')"
-            # This is best-effort fallback; if it fails, script will error out in download()
-        fi
-    fi
-    if [[ -z "${asset_url}" ]]; then
-        err "Failed to find asset matching ${pattern} in ${repo}"
+        err "Failed to find asset matching pattern '${pattern}' in ${repo}"
     fi
     local outfile="${dest_dir}/${dest_file:-$(basename "${asset_url}")}"
     download "${asset_url}" "${outfile}"
@@ -120,10 +126,10 @@ fetch_wine_source() {
         log "Updating existing Wine repository..."
         git -C "${WINE_SRC_DIR}" fetch --all --tags --prune
     else
-        log "Cloning Wine repository (this may take a while)..."
+        log "Cloning Wine repository..."
         git clone --mirror "${WINE_GIT_URL}" "${WINE_SRC_DIR}" 2>&1 | tee -a "${BUILD_LOG}"
     fi
-    # Checkout target commit
+    
     local workdir="${BUILD_DIR}/wine-source"
     rm -rf "${workdir}"
     git clone "${WINE_SRC_DIR}" "${workdir}" 2>&1 | tee -a "${BUILD_LOG}"
@@ -143,47 +149,44 @@ fetch_wine_source() {
 fetch_dxvk() {
     step "Fetching DXVK"
     local dest="${DIST_DIR}/lib64/wine/x86_64-windows"
-    mkdir -p "${dest}"
+    mkdir -p "${dest}" "${BUILD_DIR}/dxvk"
     local tarball
     if [[ -n "${DXVK_VERSION}" ]]; then
-        tarball=$(download_github_latest "doitsujin/dxvk" "dxvk-${DXVK_VERSION}.tar.gz" "${BUILD_DIR}/dxvk" "dxvk.tar.gz")
+        tarball=$(download_github_latest "doitsujin/dxvk" "dxvk-.*\\.tar\\.gz" "${BUILD_DIR}/dxvk" "dxvk.tar.gz" "${DXVK_VERSION}")
     else
-        tarball=$(download_github_latest "doitsujin/dxvk" "dxvk-.*\\.tar\\.gz$" "${BUILD_DIR}/dxvk" "dxvk.tar.gz")
+        tarball=$(download_github_latest "doitsujin/dxvk" "dxvk-.*\\.tar\\.gz" "${BUILD_DIR}/dxvk" "dxvk.tar.gz")
     fi
     log "Extracting DXVK..."
     tar -xzf "${tarball}" -C "${BUILD_DIR}/dxvk" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-    # Copy 64-bit DLLs
-    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x64/*' -exec cp -v {} "${dest}/" \\; 2>&1 | tee -a "${BUILD_LOG}"
-    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x86_64/*' -exec cp -v {} "${dest}/" \\; 2>&1 | tee -a "${BUILD_LOG}"
+    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x64/*' -exec cp -v {} "${dest}/" \; 2>&1 | tee -a "${BUILD_LOG}"
     log "DXVK DLLs installed to ${dest}"
 }
 
 fetch_vkd3d() {
     step "Fetching VKD3D-Proton"
     local dest="${DIST_DIR}/lib64/wine/x86_64-windows"
-    mkdir -p "${dest}"
+    mkdir -p "${dest}" "${BUILD_DIR}/vkd3d"
     local tarball
     if [[ -n "${VKD3D_VERSION}" ]]; then
-        tarball=$(download_github_latest "HansKristian-Work/vkd3d-proton" "vkd3d-proton-${VKD3D_VERSION}.tar.zst" "${BUILD_DIR}/vkd3d" "vkd3d.tar.zst")
+        tarball=$(download_github_latest "HansKristian-Work/vkd3d-proton" "vkd3d-proton-.*\\.tar\\.zst" "${BUILD_DIR}/vkd3d" "vkd3d.tar.zst" "${VKD3D_VERSION}")
     else
-        tarball=$(download_github_latest "HansKristian-Work/vkd3d-proton" "vkd3d-proton-.*\\.tar\\.zst$" "${BUILD_DIR}/vkd3d" "vkd3d.tar.zst")
+        tarball=$(download_github_latest "HansKristian-Work/vkd3d-proton" "vkd3d-proton-.*\\.tar\\.zst" "${BUILD_DIR}/vkd3d" "vkd3d.tar.zst")
     fi
     log "Extracting VKD3D-Proton..."
     tar -xf "${tarball}" -C "${BUILD_DIR}/vkd3d" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-    # Copy 64-bit DLLs
-    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x64/*' -exec cp -v {} "${dest}/" \\; 2>&1 | tee -a "${BUILD_LOG}"
+    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x64/*' -exec cp -v {} "${dest}/" \; 2>&1 | tee -a "${BUILD_LOG}"
     log "VKD3D-Proton DLLs installed to ${dest}"
 }
 
 fetch_wine_mono() {
     step "Fetching Wine-Mono"
     local dest="${DIST_DIR}/share/wine/mono"
-    mkdir -p "${dest}"
+    mkdir -p "${dest}" "${BUILD_DIR}/mono"
     local tarball
     if [[ -n "${WINE_MONO_VERSION}" ]]; then
-        tarball=$(download_github_latest "madewokherd/wine-mono" "wine-mono-${WINE_MONO_VERSION}.msi" "${BUILD_DIR}/mono" "wine-mono.msi")
+        tarball=$(download_github_latest "madewokherd/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi" "${WINE_MONO_VERSION}")
     else
-        tarball=$(download_github_latest "madewokherd/wine-mono" "wine-mono-.*\\.msi$" "${BUILD_DIR}/mono" "wine-mono.msi")
+        tarball=$(download_github_latest "madewokherd/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi")
     fi
     cp -v "${tarball}" "${dest}/" 2>&1 | tee -a "${BUILD_LOG}"
     log "Wine-Mono installed to ${dest}"
@@ -192,12 +195,12 @@ fetch_wine_mono() {
 fetch_wine_gecko() {
     step "Fetching Wine-Gecko"
     local dest="${DIST_DIR}/share/wine/gecko"
-    mkdir -p "${dest}"
+    mkdir -p "${dest}" "${BUILD_DIR}/gecko"
     local tarball
     if [[ -n "${WINE_GECKO_VERSION}" ]]; then
-        tarball=$(download_github_latest "wine-mirror/wine-gecko" "wine-gecko-${WINE_GECKO_VERSION}-x86_64.tar.xz" "${BUILD_DIR}/gecko" "wine-gecko.tar.xz")
+        tarball=$(download_github_latest "wine-mirror/wine-gecko" "wine-gecko-.*-x86_64\\.tar\\.xz" "${BUILD_DIR}/gecko" "wine-gecko.tar.xz" "${WINE_GECKO_VERSION}")
     else
-        tarball=$(download_github_latest "wine-mirror/wine-gecko" "wine-gecko-.*-x86_64\\.tar\\.xz$" "${BUILD_DIR}/gecko" "wine-gecko.tar.xz")
+        tarball=$(download_github_latest "wine-mirror/wine-gecko" "wine-gecko-.*-x86_64\\.tar\\.xz" "${BUILD_DIR}/gecko" "wine-gecko.tar.xz")
     fi
     log "Extracting Wine-Gecko..."
     tar -xf "${tarball}" -C "${dest}" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
@@ -207,8 +210,7 @@ fetch_wine_gecko() {
 fetch_fonts() {
     step "Fetching Liberation Fonts"
     local dest="${DIST_DIR}/share/fonts"
-    mkdir -p "${dest}"
-    # Use system fonts if available, otherwise download
+    mkdir -p "${dest}" "${BUILD_DIR}/fonts"
     if [[ -d /usr/share/fonts/liberation ]]; then
         log "Using system Liberation fonts"
         cp -v /usr/share/fonts/liberation/*.ttf "${dest}/" 2>&1 | tee -a "${BUILD_LOG}"
@@ -218,76 +220,36 @@ fetch_fonts() {
         local tarball="${BUILD_DIR}/fonts/liberation-fonts.tar.gz"
         download "${url}" "${tarball}"
         tar -xzf "${tarball}" -C "${BUILD_DIR}/fonts" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-        find "${BUILD_DIR}/fonts" -name '*.ttf' -exec cp -v {} "${dest}/" \\; 2>&1 | tee -a "${BUILD_LOG}"
+        find "${BUILD_DIR}/fonts" -name '*.ttf' -exec cp -v {} "${dest}/" \; 2>&1 | tee -a "${BUILD_LOG}"
     fi
     log "Fonts installed to ${dest}"
 }
 
 # ============================================================================================
-# WINE BUILD (via wine-tkg non-makepkg path)
+# WINE BUILD
 # ============================================================================================
 build_wine() {
     step "Building Wine (WoW64 mode)"
-    cd "${PWD}/wine-tkg-git"
+    cd "${WINE_TKG_DIR}"
     
-    # Source the non-makepkg build script
-    export _where="${PWD}/wine-tkg-git"
+    export _where="${WINE_TKG_DIR}"
     export srcdir="${BUILD_DIR}"
     
-    # Override variables for our build
-    export _NOLIB32="wow64"
-    export _use_staging="false"
-    export _unfrog="true"
-    export _protonify="true"
-    export _proton_fsync="true"
-    export _wayland_driver="true"
-    export _proton_use_steamhelper="false"
-    export _steamvr_support="false"
-    export _no_container="true"
-    export _ci_build="true"
-    export _nomakepkg_dependency_autoresolver="true"
-    export _nomakepkg_prefix_path="${DIST_DIR}"
-    export _plain_version="${WINE_COMMIT}"
-    export _custom_wine_source="${WINE_GIT_URL}"
-    export _use_GE_patches="true"
-    export _GE_WAYLAND="true"
-    export _proton_rawinput="true"
-    export _proton_bcrypt="true"
-    export _childwindow_fix="true"
-    export _proton_force_LAA="true"
-    export _win10_default="true"
-    export _proton_winedbg_disable="true"
-    export _no_steampath="y"
-    export _no_autoinstall="true"
-    export _skip_uninstaller="true"
-    export _proton_fs_hack="false"
-    export _proton_winevulkan="false"
-    export _proton_mf_patches="false"
-    export _use_fastsync="false"
-    export _use_ntsync="false"
-    export _use_esync="false"
-    export _use_fsync="false"
-    export _steamclient_noswap="false"
-    export _proton_branch="experimental_11.0"
-    export _LOCAL_PRESET="none"
-    
-    # Ensure scripts are executable
     chmod +x "${_where}"/wine-tkg-scripts/*.sh
     
-    # Run the build via non-makepkg path
     log "Starting Wine build via wine-tkg non-makepkg path..."
-    cd "${_where}"
     ACTION="build" ./non-makepkg-build.sh 2>&1 | tee -a "${BUILD_LOG}"
     
-    # The build output goes to ${_where}/wine-tkg-* or similar; find it
     local built_dir
-    built_dir=$(find "${_where}" -maxdepth 1 -type d -name 'wine-tkg-*' 2>/dev/null | head -1)
+    built_dir=$(find "${_where}/non-makepkg-builds" -maxdepth 2 -type d -name 'wine-tkg-*' 2>/dev/null | head -1)
     if [[ -z "${built_dir}" ]]; then
-        err "Could not locate built wine-tkg directory"
+        built_dir=$(find "${_where}" -maxdepth 2 -type d -name 'wine-tkg-*' 2>/dev/null | head -1)
+    fi
+    if [[ -z "${built_dir}" ]]; then
+        err "Could not locate built wine-tkg directory in non-makepkg-builds"
     fi
     log "Found build output: ${built_dir}"
     
-    # Copy to our dist structure
     step "Installing Wine build to dist/"
     mkdir -p "${DIST_DIR}"
     rsync -a "${built_dir}/" "${DIST_DIR}/" 2>&1 | tee -a "${BUILD_LOG}"
@@ -299,25 +261,26 @@ build_wine() {
 # ============================================================================================
 package_runner() {
     step "Packaging SteamFlow Runner"
-    local output="${PWD}/steamflow-runner-wine11-wow64.tar.gz"
-    log "Creating archive: ${output}"
-    tar -czf "${output}" -C "${PWD}/dist" steamflow-runner 2>&1 | tee -a "${BUILD_LOG}"
-    log "Archive created: ${output}"
-    ls -lh "${output}" | tee -a "${BUILD_LOG}"
+    local output="${ROOT_DIR}/steamflow-runner-wine11-wow64.tar.gz"
     
     # Write manifest
-    cat > "${PWD}/dist/steamflow-runner/MANIFEST.txt" <<MANIFEST
+    cat > "${DIST_DIR}/MANIFEST.txt" <<MANIFEST
 SteamFlow WoW64 Wine Runner
 ===========================
 Wine: $(cat "${BUILD_DIR}/wine_commit.txt" 2>/dev/null || echo "unknown")
-DXVK: $(ls "${DIST_DIR}/lib64/wine/x86_64-windows"/dxvk*.dll 2>/dev/null | head -1 | xargs basename || echo "not found")
-VKD3D: $(ls "${DIST_DIR}/lib64/wine/x86_64-windows"/vkd3d*.dll 2>/dev/null | head -1 | xargs basename || echo "not found")
-Mono: $(ls "${DIST_DIR}/share/wine/mono"/wine-mono*.msi 2>/dev/null | head -1 | xargs basename || echo "not found")
+DXVK: $(ls "${DIST_DIR}/lib64/wine/x86_64-windows"/dxvk*.dll 2>/dev/null | head -1 | xargs -r basename || echo "not found")
+VKD3D: $(ls "${DIST_DIR}/lib64/wine/x86_64-windows"/vkd3d*.dll 2>/dev/null | head -1 | xargs -r basename || echo "not found")
+Mono: $(ls "${DIST_DIR}/share/wine/mono"/wine-mono*.msi 2>/dev/null | head -1 | xargs -r basename || echo "not found")
 Gecko: $(ls "${DIST_DIR}/share/wine/gecko" 2>/dev/null | head -1 || echo "not found")
 Fonts: $(ls "${DIST_DIR}/share/fonts"/*.ttf 2>/dev/null | wc -l) files
 Built: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 MANIFEST
-    cat "${PWD}/dist/steamflow-runner/MANIFEST.txt" | tee -a "${BUILD_LOG}"
+    cat "${DIST_DIR}/MANIFEST.txt" | tee -a "${BUILD_LOG}"
+
+    log "Creating archive: ${output}"
+    tar -czf "${output}" -C "${ROOT_DIR}/dist" steamflow-runner 2>&1 | tee -a "${BUILD_LOG}"
+    log "Archive created: ${output}"
+    ls -lh "${output}" | tee -a "${BUILD_LOG}"
 }
 
 # ============================================================================================
@@ -325,6 +288,7 @@ MANIFEST
 # ============================================================================================
 main() {
     step "Starting SteamFlow WoW64 Wine 11 Master Runner Build"
+    log "Root directory: ${ROOT_DIR}"
     log "Build directory: ${BUILD_DIR}"
     log "Dist directory: ${DIST_DIR}"
     log "Wine source: ${WINE_GIT_URL} @ ${WINE_COMMIT:-HEAD}"
@@ -332,23 +296,22 @@ main() {
     mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
     : > "${BUILD_LOG}"
     
-    # Fetch all components in parallel where possible
-    fetch_wine_source &
-    fetch_dxvk &
-    fetch_vkd3d &
-    fetch_wine_mono &
-    fetch_wine_gecko &
-    fetch_fonts &
-    wait
+    # Fetch assets sequentially to preserve clean logs
+    fetch_wine_source
+    fetch_dxvk
+    fetch_vkd3d
+    fetch_wine_mono
+    fetch_wine_gecko
+    fetch_fonts
     
-    # Build Wine (this takes the longest, do it last after downloads)
+    # Compile Wine
     build_wine
     
-    # Package
+    # Package release artifact
     package_runner
     
     step "Build complete!"
-    log "Artifact: ${PWD}/steamflow-runner-wine11-wow64.tar.gz"
+    log "Artifact: ${ROOT_DIR}/steamflow-runner-wine11-wow64.tar.gz"
     log "Build log: ${BUILD_LOG}"
 }
 
