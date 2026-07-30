@@ -184,7 +184,7 @@ fetch_fonts() {
         find /usr/share/fonts -iname "Liberation*.ttf" -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}"
     else
         log "Downloading Liberation Fonts fallback..."
-        local url="https://github.com/liberationfonts/liberation-fonts/releases/download/2.1.5/liberation-fonts-ttf-2.1.5.tar.gz"
+        local url="https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz"
         local tarball="${BUILD_DIR}/fonts/liberation-fonts.tar.gz"
         download "${url}" "${tarball}"
         tar -xzf "${tarball}" -C "${BUILD_DIR}/fonts" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
