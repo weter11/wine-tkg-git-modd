@@ -134,7 +134,8 @@ jobs:
             export CXXFLAGS="${CFLAGS} -Wno-error=attributes"
             export MAKEFLAGS="-j$(nproc)"
             
-            # Run the build script
+            # Make build script executable and run
+            chmod +x ./build-steamflow-runner.sh
             ./build-steamflow-runner.sh 2>&1 | tee build.log
             exit ${PIPESTATUS[0]}
           '
@@ -157,9 +158,7 @@ jobs:
           echo "### Build Failure Summary" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           if [ -f "$GITHUB_WORKSPACE/build.log" ]; then
-            grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" \
-              "$GITHUB_WORKSPACE/build.log" \vert{} tail -150 >> "$GITHUB_STEP_SUMMARY" \
-              || echo "No matching error lines found." >> "$GITHUB_STEP_SUMMARY"
+            grep -nEi "error:|FAILED:|fatal error|undefined reference" "$GITHUB_WORKSPACE/build.log" \vert{} tail -n 150 >> "$GITHUB_STEP_SUMMARY" || echo "No matching error lines found." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "build.log was not generated." >> "$GITHUB_STEP_SUMMARY"
           fi
