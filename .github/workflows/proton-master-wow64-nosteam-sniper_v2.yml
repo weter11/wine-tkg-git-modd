@@ -78,17 +78,25 @@ jobs:
             # rather than needing a patch at every individual call site.
             export CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
 
-            # Create unified proton-tkg.cfg targeting upstream Wine master.
-            # printf instead of a heredoc: a heredoc terminator must sit at
-            # column zero with zero leading whitespace, which is easy to break
-            # by accident inside an indented YAML block scalar wrapped in a
-            # quoted bash -c string -- if it breaks, bash keeps consuming every
-            # following line as literal file content instead of executing it,
-            # silently skipping the rest of the script with no error.
+            # Append our overrides to the END of proton-tkg.cfg instead of
+            # replacing it outright ("> proton-tkg.cfg" was overwriting the
+            # entire file, which silently deleted real defaults we never
+            # meant to touch -- e.g. _wayland_driver="true", native Wayland
+            # driver support, not just XWayland). tee -a appends the same
+            # overrides to advanced-customization.cfg at the same time, since
+            # we've seen different variables get read from each file at
+            # different points in the build.
+            #
+            # _plain_version is intentionally empty: it was only ever needed
+            # to land on a commit the steamclient-swap patch's ancestor-check
+            # would accept. With _unfrog="true" below skipping that patch
+            # entirely, there's no more reason to sit on an old, awkward
+            # commit -- track live wine master, which is what a "master wine"
+            # build should actually mean.
             {
               printf "%s\n" "_LOCAL_PRESET=\"none\""
               printf "%s\n" "_custom_wine_source=\"https://gitlab.winehq.org/wine/wine.git\""
-              printf "%s\n" "_plain_version=\"03277f2f770aebe35c09a73a29be6abb8b47b3c2\""
+              printf "%s\n" "_plain_version=\"\""
               printf "%s\n" "_use_staging=\"false\""
               printf "%s\n" "_NOLIB32=\"wow64\""
               printf "%s\n" "_no_steampath=\"y\""
@@ -99,19 +107,18 @@ jobs:
               printf "%s\n" "_build_mediaconv=\"false\""
               printf "%s\n" "uninstaller=\"true\""
               printf "%s\n" "autoinstall=\"true\""
-            } > proton-tkg.cfg
-
-            # Append our overrides to the END of the existing
-            # advanced-customization.cfg instead of replacing it outright.
-            # That file ships real defaults we don't otherwise set (e.g.
-            # _proton_branch="experimental_11.0") -- overwriting it wholesale
-            # silently deleted _proton_branch, which is exactly what caused
-            # `git checkout "$_proton_branch"` to fail as `git checkout ""`.
-            # Appending preserves every default we haven't touched, while
-            # bash's normal "last assignment wins" sourcing behavior still
-            # lets our own lines win for anything we do set.
-            mkdir -p proton-tkg-profiles
-            cat proton-tkg.cfg >> proton-tkg-profiles/advanced-customization.cfg
+              # Skips the entire proton-tkg-steamclient-swap patch family
+              # (gated by prepare.sh:1035 on _unfrog != "true"), along with a
+              # few other Frogging-Family/proton-specific extras (LAA
+              # handling, some staging integration). This build already
+              # deletes build_lsteamclient/build_steamhelper below, so it
+              # doesn't want the steamclient bridge that patch exists to
+              # support -- skipping it avoids the whole nice_limit /
+              # steamclient_addr / GetPackagesByPackageFamily /
+              # __wine_set_unix_env chain of failures we hit chasing patch
+              # compatibility for a feature this build was never going to use.
+              printf "%s\n" "_unfrog=\"true\""
+            } | tee -a proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg > /dev/null
 
             # Stub out only the actual call sites (proton-tkg.sh line ~1114 and
             # ~1117), not every line mentioning these names. A broad
