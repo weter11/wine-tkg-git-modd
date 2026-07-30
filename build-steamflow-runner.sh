@@ -16,7 +16,7 @@ WINE_COMMIT="${WINE_COMMIT:-}"  # Empty = HEAD (master)
 DXVK_VERSION="${DXVK_VERSION:-}"
 VKD3D_VERSION="${VKD3D_VERSION:-}"
 WINE_MONO_VERSION="${WINE_MONO_VERSION:-}"
-WINE_GECKO_VERSION="${WINE_GECKO_VERSION:-}"
+WINE_GECKO_VERSION="${WINE_GECKO_VERSION:-2.47.4}"
 
 # ============================================================================================
 # BUILD CONFIGURATION
@@ -26,41 +26,6 @@ DIST_DIR="${ROOT_DIR}/dist/steamflow-runner"
 WINE_SRC_DIR="${BUILD_DIR}/wine-git"
 BUILD_LOG="${BUILD_DIR}/build.log"
 WINE_TKG_DIR="${ROOT_DIR}/wine-tkg-git"
-
-# Wine build config
-export _NOLIB32="wow64"
-export _use_staging="false"
-export _unfrog="true"
-export _protonify="true"
-export _proton_fsync="true"
-export _wayland_driver="true"
-export _proton_use_steamhelper="false"
-export _steamvr_support="false"
-export _no_container="true"
-export _ci_build="true"
-export _nomakepkg_dependency_autoresolver="true"
-export _nomakepkg_prefix_path="${DIST_DIR}"
-export _plain_version="${WINE_COMMIT}"
-export _custom_wine_source="${WINE_GIT_URL}"
-export _use_GE_patches="true"
-export _GE_WAYLAND="true"
-export _proton_rawinput="true"
-export _proton_bcrypt="true"
-export _childwindow_fix="true"
-export _proton_force_LAA="true"
-export _win10_default="true"
-export _proton_winedbg_disable="true"
-export _no_steampath="y"
-export _no_autoinstall="true"
-export _skip_uninstaller="true"
-export _proton_fs_hack="false"
-export _proton_winevulkan="false"
-export _proton_mf_patches="false"
-export _use_fastsync="false"
-export _use_ntsync="false"
-export _use_esync="false"
-export _use_fsync="false"
-export _steamclient_noswap="false"
 
 # GCC 14 compatibility flags
 export CFLAGS="-O2 -pipe -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -fno-strict-aliasing"
@@ -185,9 +150,9 @@ fetch_wine_mono() {
     mkdir -p "${dest}" "${BUILD_DIR}/mono"
     local tarball
     if [[ -n "${WINE_MONO_VERSION}" ]]; then
-        tarball=$(download_github_latest "madewokherd/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi" "${WINE_MONO_VERSION}")
+        tarball=$(download_github_latest "wine-mono/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi" "${WINE_MONO_VERSION}")
     else
-        tarball=$(download_github_latest "madewokherd/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi")
+        tarball=$(download_github_latest "wine-mono/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi")
     fi
     cp -v "${tarball}" "${dest}/" 2>&1 | tee -a "${BUILD_LOG}"
     log "Wine-Mono installed to ${dest}"
@@ -197,14 +162,14 @@ fetch_wine_gecko() {
     step "Fetching Wine-Gecko"
     local dest="${DIST_DIR}/share/wine/gecko"
     mkdir -p "${dest}" "${BUILD_DIR}/gecko"
-    local tarball
-    if [[ -n "${WINE_GECKO_VERSION}" ]]; then
-        tarball=$(download_github_latest "wine-mirror/wine-gecko" "wine-gecko-.*-x86_64\\.tar\\.xz" "${BUILD_DIR}/gecko" "wine-gecko.tar.xz" "${WINE_GECKO_VERSION}")
-    else
-        tarball=$(download_github_latest "wine-mirror/wine-gecko" "wine-gecko-.*-x86_64\\.tar\\.xz" "${BUILD_DIR}/gecko" "wine-gecko.tar.xz")
-    fi
+    local version="${WINE_GECKO_VERSION}"
+    local tarball="${BUILD_DIR}/gecko/wine-gecko-${version}-x86_64.tar.xz"
+    local url="https://dl.winehq.org/wine/wine-gecko/${version}/wine-gecko-${version}-x86_64.tar.xz"
+    
+    log "Downloading Wine-Gecko ${version} from WineHQ..."
+    download "${url}" "${tarball}"
     log "Extracting Wine-Gecko..."
-    tar -xf "${tarball}" -C "${dest}" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
+    tar -xf "${tarball}" -C "${dest}" 2>&1 | tee -a "${BUILD_LOG}"
     log "Wine-Gecko installed to ${dest}"
 }
 
@@ -233,6 +198,34 @@ build_wine() {
     step "Building Wine (WoW64 mode)"
     cd "${WINE_TKG_DIR}"
     
+    # Write configuration overrides directly to wine-tkg.cfg
+    cat << EOF > wine-tkg.cfg
+_LOCAL_PRESET="none"
+_custom_wine_source="${WINE_GIT_URL}"
+_plain_version="${WINE_COMMIT}"
+_use_staging="false"
+_unfrog="true"
+_protonify="true"
+_proton_fsync="true"
+_wayland_driver="true"
+_proton_use_steamhelper="false"
+_steamvr_support="false"
+_no_container="true"
+_ci_build="true"
+_NOLIB32="wow64"
+_no_steampath="y"
+_no_autoinstall="true"
+_skip_uninstaller="true"
+_proton_fs_hack="false"
+_proton_winevulkan="false"
+_proton_mf_patches="false"
+_use_fastsync="false"
+_use_ntsync="false"
+_use_esync="false"
+_use_fsync="false"
+_steamclient_noswap="false"
+EOF
+
     export _where="${WINE_TKG_DIR}"
     export srcdir="${BUILD_DIR}"
     
@@ -287,7 +280,6 @@ MANIFEST
 # MAIN
 # ============================================================================================
 main() {
-    # Ensure build directory exists before any logging functions execute
     mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
     : > "${BUILD_LOG}"
 
