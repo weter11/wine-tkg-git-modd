@@ -50,17 +50,22 @@ jobs:
         run: |
           cd proton-tkg
 
-          # Patch defaults inside proton-tkg.sh to bypass interactive checks
+          # 1. Bypass non-interactive / container prompts
           sed -i 's/_no_steampath="false"/_no_steampath="y"/' proton-tkg.sh
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
 
-          # Safely comment out ONLY the function calls at the bottom of proton-tkg.sh
-          # Anchored with ^[[:space:]]* so function headers (function build_vrclient {) are NOT broken
-          sed -i 's/^[[:space:]]*build_lsteamclient$/# skipped build_lsteamclient/' proton-tkg.sh
-          sed -i 's/^[[:space:]]*build_steamhelper$/# skipped build_steamhelper/' proton-tkg.sh
-          sed -i 's/^[[:space:]]*build_vrclient$/# skipped build_vrclient/' proton-tkg.sh
+          # 2. Stub out target functions directly at definition (return 0)
+          # Keeps elif control blocks syntax-valid while bypassing compilation
+          sed -i 's/^function build_lsteamclient {/function build_lsteamclient { return 0;/' proton-tkg.sh
+          sed -i 's/^function build_steamhelper {/function build_steamhelper { return 0;/' proton-tkg.sh
+          sed -i 's/^function build_vrclient {/function build_vrclient { return 0;/' proton-tkg.sh
+          sed -i 's/^function build_mediaconverter {/function build_mediaconverter { return 0;/' proton-tkg.sh
 
-          # Generate unified proton-tkg.cfg targeting Upstream Wine Master
+          # 3. Neutralize GStreamer strip & move statements to prevent post-build packaging failure
+          sed -i 's|strip --strip-unneeded "$_nowhere"/gst|# strip gst|g' proton-tkg.sh
+          sed -i 's|mv "$_nowhere"/gst|# mv gst|g' proton-tkg.sh
+
+          # 4. Generate unified proton-tkg.cfg targeting Upstream Wine Master
           cat << "EOF" > proton-tkg.cfg
           _LOCAL_PRESET="none"
           _custom_wine_source="https://gitlab.winehq.org/wine/wine.git"
@@ -77,11 +82,11 @@ jobs:
           autoinstall="true"
           EOF
 
-          # Mirror configuration to advanced-customization.cfg to prevent sourcing gaps
+          # Mirror configuration to advanced-customization.cfg
           mkdir -p proton-tkg-profiles
           cp proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg
 
-          # Execute build script safely capturing PIPESTATUS[1]
+          # 5. Execute build script capturing PIPESTATUS[1]
           export MAKEFLAGS="-j$(nproc)"
           set -o pipefail
           yes | ./proton-tkg.sh 2>&1 | tee build.log
