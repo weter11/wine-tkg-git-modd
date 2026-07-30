@@ -67,7 +67,18 @@ jobs:
             set -eu
             cd "$GITHUB_WORKSPACE/proton-tkg"
 
-            # Export build environment variables
+            # 1. Initialize a dummy Proton Git repo so internal `cd Proton` checks pass cleanly
+            mkdir -p Proton
+            git -C Proton init -q
+            git -C Proton config user.name "CI"
+            git -C Proton config user.email "ci@example.com"
+            git -C Proton commit --allow-empty -m "init" -q
+            git -C Proton checkout -b experimental_8.0 -q 2>/dev/null || true
+
+            # 2. Prevent proton-tkg.sh from trying to fetch/overwrite the dummy Proton repo
+            sed -i "s|git clone.*Proton.*|true|g" proton-tkg.sh
+
+            # 3. Export build environment variables
             export _NOLIB32="wow64"
             export _no_steampath="y"
             export _steamvr_support="false"
@@ -77,37 +88,34 @@ jobs:
             export _ci_build="true"
             export MAKEFLAGS="-j$(nproc)"
 
-            # GCC 14 compatibility flags for older C call sites in Wine
+            # GCC 14 CFLAGS compatibility for older C call sites in Wine
             export CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
 
-            # 1. Stub out build functions at definition point so they return 0 instantly
+            # 4. Stub out Linux Steam bridge build functions at definition (return 0 immediately)
             sed -i "s/^function build_vrclient {/function build_vrclient { return 0;/" proton-tkg.sh
             sed -i "s/^function build_lsteamclient {/function build_lsteamclient { return 0;/" proton-tkg.sh
             sed -i "s/^function build_steamhelper {/function build_steamhelper { return 0;/" proton-tkg.sh
             sed -i "s/^function build_mediaconverter {/function build_mediaconverter { return 0;/" proton-tkg.sh
 
-            # 2. Neutralize directory change & git checkout edge cases
-            sed -i "s/cd Proton/true/g" proton-tkg.sh
-            sed -i "s/git checkout \"\$_proton_branch\"/true/g" proton-tkg.sh
-
-            # 3. Preserve valid Bash syntax in GStreamer move/strip conditionals
+            # 5. Preserve valid Bash syntax in GStreamer move/strip conditionals
             sed -i "s|strip --strip-unneeded \"\$_nowhere\"/gst.*|true|g" proton-tkg.sh
             sed -i "s|mv \"\$_nowhere\"/gst.*|true|g" proton-tkg.sh
 
-            # 4. Teach proton-tkg.sh that _NOLIB32="wow64" skips 32-bit library packaging paths
+            # 6. Teach proton-tkg.sh that _NOLIB32="wow64" skips 32-bit library packaging paths
             sed -i "s/if \[ \"\$_NOLIB32\" != \"true\" \]; then/if [ \"\$_NOLIB32\" != \"true\" ] \&\& [ \"\$_NOLIB32\" != \"wow64\" ]; then/g" proton-tkg.sh
 
-            # 5. Write overrides targeting clean Upstream Wine Master
+            # 7. Write configuration overrides
+            # _protonify="true" keeps Proton game patches active (fsync, game fixes, etc.)
+            # _unfrog="true" skips ONLY the broken linux-steamclient bridge swap patch family
             mkdir -p proton-tkg-profiles
             {
               printf "%s\n" "_LOCAL_PRESET=\"none\""
               printf "%s\n" "_custom_wine_source=\"https://gitlab.winehq.org/wine/wine.git\""
               printf "%s\n" "_plain_version=\"\""
               printf "%s\n" "_use_staging=\"false\""
-              printf "%s\n" "_protonify=\"false\""
+              printf "%s\n" "_protonify=\"true\""
               printf "%s\n" "_proton_use_steamhelper=\"false\""
-              printf "%s\n" "_proton_fsync=\"false\""
-              printf "%s\n" "_proton_fs_hack=\"false\""
+              printf "%s\n" "_proton_fsync=\"true\""
               printf "%s\n" "_unfrog=\"true\""
               printf "%s\n" "_NOLIB32=\"wow64\""
               printf "%s\n" "_no_steampath=\"y\""
