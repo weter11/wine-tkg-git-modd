@@ -101,9 +101,17 @@ jobs:
               printf "%s\n" "autoinstall=\"true\""
             } > proton-tkg.cfg
 
-            # Mirror configuration to advanced-customization.cfg
+            # Append our overrides to the END of the existing
+            # advanced-customization.cfg instead of replacing it outright.
+            # That file ships real defaults we don't otherwise set (e.g.
+            # _proton_branch="experimental_11.0") -- overwriting it wholesale
+            # silently deleted _proton_branch, which is exactly what caused
+            # `git checkout "$_proton_branch"` to fail as `git checkout ""`.
+            # Appending preserves every default we haven't touched, while
+            # bash's normal "last assignment wins" sourcing behavior still
+            # lets our own lines win for anything we do set.
             mkdir -p proton-tkg-profiles
-            cp proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg
+            cat proton-tkg.cfg >> proton-tkg-profiles/advanced-customization.cfg
 
             # Stub out only the actual call sites (proton-tkg.sh line ~1114 and
             # ~1117), not every line mentioning these names. A broad
