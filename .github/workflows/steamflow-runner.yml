@@ -26,8 +26,12 @@ jobs:
       options: --user root
 
     steps:
+      - name: Install git for checkout
+        run: |
+          pacman -Sy --noconfirm git
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -108,7 +112,6 @@ jobs:
 
       - name: Configure build environment
         run: |
-          # Write build config with any workflow dispatch inputs
           cat > "$GITHUB_WORKSPACE/build-config.env" <<ENVCFG
           export WINE_COMMIT="${{ github.event.inputs.wine_commit }}"
           export DXVK_VERSION="${{ github.event.inputs.dxvk_version }}"
@@ -141,7 +144,7 @@ jobs:
         run: |
           echo "### Wine commit used" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat "$GITHUB_WORKSPACE/build/wine_commit.txt" 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || echo "Not found" >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_WORKSPACE/build/wine_commit.txt" 2>/dev/null >> "$GITHUB_STEP_SUMMARY" \vert{}\vert{} echo "Not found" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show build errors on failure
@@ -150,13 +153,13 @@ jobs:
           echo "### Build Failure Summary" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" \
-            "$GITHUB_WORKSPACE/build.log" | tail -150 >> "$GITHUB_STEP_SUMMARY" \
+            "$GITHUB_WORKSPACE/build.log" \vert{} tail -150 >> "$GITHUB_STEP_SUMMARY" \
             || echo "No matching error lines found." >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: steamflow-runner-build-log
           path: |
@@ -167,7 +170,7 @@ jobs:
 
       - name: Upload SteamFlow Runner artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: steamflow-runner-wine11-wow64
           path: steamflow-runner-wine11-wow64.tar.gz
