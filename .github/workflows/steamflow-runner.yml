@@ -124,7 +124,7 @@ jobs:
           DXVK_VERSION: ${{ github.event.inputs.dxvk_version }}
           VKD3D_VERSION: ${{ github.event.inputs.vkd3d_version }}
         run: |
-          sudo -u user bash -c '
+          sudo -u user GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash -c '
             set -euo pipefail
             cd "$GITHUB_WORKSPACE"
             source build-config.env 2>/dev/null || true
@@ -144,7 +144,11 @@ jobs:
         run: |
           echo "### Wine commit used" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat "$GITHUB_WORKSPACE/build/wine_commit.txt" 2>/dev/null >> "$GITHUB_STEP_SUMMARY" \vert{}\vert{} echo "Not found" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$GITHUB_WORKSPACE/build/wine_commit.txt" ]; then
+            cat "$GITHUB_WORKSPACE/build/wine_commit.txt" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Not found (build failed before Wine checkout)" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show build errors on failure
@@ -152,9 +156,13 @@ jobs:
         run: |
           echo "### Build Failure Summary" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" \
-            "$GITHUB_WORKSPACE/build.log" \vert{} tail -150 >> "$GITHUB_STEP_SUMMARY" \
-            || echo "No matching error lines found." >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$GITHUB_WORKSPACE/build.log" ]; then
+            grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" \
+              "$GITHUB_WORKSPACE/build.log" \vert{} tail -150 >> "$GITHUB_STEP_SUMMARY" \
+              || echo "No matching error lines found." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "build.log was not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build log
