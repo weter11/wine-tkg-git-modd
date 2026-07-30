@@ -63,8 +63,9 @@ jobs:
           sed -i 's/^function build_vrclient {/function build_vrclient { return 0;/' proton-tkg.sh
           sed -i 's/^function build_mediaconverter {/function build_mediaconverter { return 0;/' proton-tkg.sh
 
-          # 3. Neutralize attempts to patch the Valve Proton tree when cloning is skipped
-          sed -i 's|cd.*Proton.*patch|true|g' proton-tkg.sh
+          # 3. Safely replace Proton subshells with ( true ) to keep syntax intact
+          sed -i 's/( cd Proton.*/( true )/g' proton-tkg.sh
+          sed -i 's/(cd Proton.*/( true )/g' proton-tkg.sh
 
           # 4. Preserve valid syntax in GStreamer move/strip conditionals
           sed -i 's|strip --strip-unneeded "$_nowhere"/gst.*|true|g' proton-tkg.sh
