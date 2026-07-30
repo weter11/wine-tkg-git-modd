@@ -6,29 +6,109 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    container:
+      image: archlinux:latest
 
     steps:
       - uses: actions/checkout@v7
-      - name: Compile
+
+      - name: Install Dependencies
         run: |
-          pacman -Syu --noconfirm base-devel sudo
-          useradd user -G wheel && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown user -R ..
-          chown user -R /tmp
-          export CARGO_HOME="$PWD"
+          pacman -Syu --noconfirm --needed \
+            base-devel \
+            git \
+            zip \
+            patch \
+            python \
+            rsync \
+            wget \
+            curl \
+            pkgconf \
+            cmake \
+            ninja \
+            bison \
+            flex \
+            fontconfig \
+            freetype2 \
+            gnutls \
+            libx11 \
+            libxext \
+            libxinerama \
+            libxrandr \
+            libxrender \
+            libxcomposite \
+            libxi \
+            libxcursor \
+            vulkan-icd-loader \
+            vulkan-headers \
+            mesa \
+            wayland \
+            wayland-protocols \
+            mingw-w64-gcc
+
+      - name: Configure & Compile Proton-tkg
+        run: |
           cd proton-tkg
-          sed -i 's/uninstaller="false"/uninstaller="true"/' proton-tkg.cfg
-          sed -i 's/autoinstall="false"/autoinstall="true"/' proton-tkg.cfg
-          sed -i 's/LOCAL_PRESET=""/LOCAL_PRESET="none"/' proton-tkg.cfg
-          printf '_steamclient_noswap="true"\n_NOLIB32="wow64"\n' >> proton-tkg-profiles/advanced-customization.cfg
-          sed -i 's/build_gstreamer="false"/build_gstreamer="true"/' proton-tkg.cfg
-          sed -i 's/wayland_driver="false"/wayland_driver="true"/' proton-tkg.cfg
+
+          # Patch defaults directly inside proton-tkg.sh to prevent early exit
+          sed -i 's/_no_steampath="false"/_no_steampath="y"/' proton-tkg.sh
           sed -i 's/_no_container="false"/_no_container="true"/' proton-tkg.sh
-          touch tarplz
-          yes|./proton-tkg.sh
-      - name: Archive the artifacts
+
+          # Stub out Linux Steam bridge and VR builds (Windows Steam runs inside prefix)
+          sed -i 's/.*build_lsteamclient.*/# skipped build_lsteamclient/' proton-tkg.sh
+          sed -i 's/.*build_steamhelper.*/# skipped build_steamhelper/' proton-tkg.sh
+          sed -i 's/.*build_vrclient.*/# skipped build_vrclient/' proton-tkg.sh
+
+          # Generate unified proton-tkg.cfg targeting Upstream Wine Master
+          cat << "EOF" > proton-tkg.cfg
+          _LOCAL_PRESET="none"
+          _custom_wine_source="https://gitlab.winehq.org/wine/wine.git"
+          _plain_version=""
+          _use_staging="false"
+          _NOLIB32="wow64"
+          _no_steampath="y"
+          _no_container="true"
+          _ci_build="true"
+          _steamvr_support="false"
+          _build_gstreamer="false"
+          _build_mediaconv="false"
+          uninstaller="true"
+          autoinstall="true"
+          EOF
+
+          # Mirror configuration to advanced-customization.cfg to prevent sourcing gaps
+          mkdir -p proton-tkg-profiles
+          cp proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg
+
+          # Execute build script safely capturing PIPESTATUS[1]
+          export MAKEFLAGS="-j$(nproc)"
+          set -o pipefail
+          yes | ./proton-tkg.sh 2>&1 | tee build.log
+          build_rc=${PIPESTATUS[1]}
+          exit $build_rc
+
+      - name: Show build errors on failure
+        if: failure()
+        run: |
+          echo "### Build Failure Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -nEi "error:|Error [0-9]+|FAILED:|fatal error|undefined reference" \
+            proton-tkg/build.log | tail -150 >> "$GITHUB_STEP_SUMMARY" \
+            || echo "No matching error lines found." >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full build log
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: proton-tkg-build
-          path: proton-tkg/built/*.tar
+          name: proton-tkg-master-wow64-nosteam-build-log
+          path: proton-tkg/build.log
+
+      - name: Upload Proton Artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: proton-tkg-master-wow64-nosteam
+          path: |
+            proton-tkg/built/
+            proton-tkg/non-makepkg-builds/
