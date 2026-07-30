@@ -76,7 +76,7 @@ jobs:
             {
               printf "%s\n" "_LOCAL_PRESET=\"none\""
               printf "%s\n" "_custom_wine_source=\"https://gitlab.winehq.org/wine/wine.git\""
-              printf "%s\n" "_plain_version=\"\""
+              printf "%s\n" "_plain_version=\"7177ece86ca3ab0bd2da0e091c143aa888d856de\""
               printf "%s\n" "_use_staging=\"false\""
               printf "%s\n" "_NOLIB32=\"wow64\""
               printf "%s\n" "_no_steampath=\"y\""
@@ -112,8 +112,28 @@ jobs:
             set -o pipefail
             yes | ./proton-tkg.sh 2>&1 | tee build.log
             build_rc=${PIPESTATUS[1]}
+
+            # Record which commit the wine source actually landed on, so a
+            # repeat failure can be diagnosed from evidence instead of
+            # re-deriving it from the cfg-sourcing chain again. The source
+            # directory is cloned early, well before compilation could fail,
+            # so it exists regardless of whether the build itself succeeded.
+            _wdir=$(find . -maxdepth 1 -iname "wine-*" -type d 2>/dev/null | head -n1)
+            if [ -n "$_wdir" ] && [ -e "$_wdir/.git" ]; then
+              git -C "$_wdir" log -1 --oneline > wine_commit_actually_checked_out.log 2>&1 || true
+            fi
+
             exit $build_rc
           '
+
+      - name: Show which wine commit was actually used
+        if: always()
+        run: |
+          echo "### Wine commit actually checked out" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat proton-tkg/wine_commit_actually_checked_out.log >> "$GITHUB_STEP_SUMMARY" \
+            || echo "File not found -- wine source directory never appeared." >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show build errors on failure
         if: failure()
