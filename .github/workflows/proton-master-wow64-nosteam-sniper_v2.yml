@@ -93,6 +93,7 @@ jobs:
             # entirely, there's no more reason to sit on an old, awkward
             # commit -- track live wine master, which is what a "master wine"
             # build should actually mean.
+            mkdir -p proton-tkg-profiles
             {
               printf "%s\n" "_LOCAL_PRESET=\"none\""
               printf "%s\n" "_custom_wine_source=\"https://gitlab.winehq.org/wine/wine.git\""
