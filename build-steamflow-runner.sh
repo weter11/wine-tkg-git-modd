@@ -72,12 +72,12 @@ export CROSSLDFLAGS="${LDFLAGS}"
 export MAKEFLAGS="-j$(nproc)"
 
 # ============================================================================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (Logging redirected to stderr so command substitutions stay clean)
 # ============================================================================================
-log() { echo -e "\033[1;34m[build]\033[0m $*" | tee -a "${BUILD_LOG}"; }
-warn() { echo -e "\033[1;33m[warn]\033[0m $*" | tee -a "${BUILD_LOG}"; }
-err() { echo -e "\033[1;31m[error]\033[0m $*" | tee -a "${BUILD_LOG}"; exit 1; }
-step() { echo -e "\n\033[1;36m=== $* ===\033[0m" | tee -a "${BUILD_LOG}"; }
+log() { echo -e "\033[1;34m[build]\033[0m $*" | tee -a "${BUILD_LOG}" >&2; }
+warn() { echo -e "\033[1;33m[warn]\033[0m $*" | tee -a "${BUILD_LOG}" >&2; }
+err() { echo -e "\033[1;31m[error]\033[0m $*" | tee -a "${BUILD_LOG}" >&2; exit 1; }
+step() { echo -e "\n\033[1;36m=== $* ===\033[0m" | tee -a "${BUILD_LOG}" >&2; }
 
 download() {
     local url="$1" dest="$2"
@@ -287,7 +287,7 @@ MANIFEST
 # MAIN
 # ============================================================================================
 main() {
-    # MUST create build directory before running step/log functions that write to BUILD_LOG
+    # Ensure build directory exists before any logging functions execute
     mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
     : > "${BUILD_LOG}"
 
@@ -297,7 +297,7 @@ main() {
     log "Dist directory: ${DIST_DIR}"
     log "Wine source: ${WINE_GIT_URL} @ ${WINE_COMMIT:-HEAD}"
     
-    # Fetch assets sequentially to preserve clean logs
+    # Fetch assets sequentially
     fetch_wine_source
     fetch_dxvk
     fetch_vkd3d
