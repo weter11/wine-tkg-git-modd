@@ -158,7 +158,8 @@ fetch_dxvk() {
     fi
     log "Extracting DXVK..."
     tar -xzf "${tarball}" -C "${BUILD_DIR}/dxvk" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x64/*' -exec cp -v {} "${dest}/" \; 2>&1 | tee -a "${BUILD_LOG}"
+    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x86_64/*' -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
     log "DXVK DLLs installed to ${dest}"
 }
 
@@ -174,7 +175,7 @@ fetch_vkd3d() {
     fi
     log "Extracting VKD3D-Proton..."
     tar -xf "${tarball}" -C "${BUILD_DIR}/vkd3d" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x64/*' -exec cp -v {} "${dest}/" \; 2>&1 | tee -a "${BUILD_LOG}"
+    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
     log "VKD3D-Proton DLLs installed to ${dest}"
 }
 
@@ -220,7 +221,7 @@ fetch_fonts() {
         local tarball="${BUILD_DIR}/fonts/liberation-fonts.tar.gz"
         download "${url}" "${tarball}"
         tar -xzf "${tarball}" -C "${BUILD_DIR}/fonts" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-        find "${BUILD_DIR}/fonts" -name '*.ttf' -exec cp -v {} "${dest}/" \; 2>&1 | tee -a "${BUILD_LOG}"
+        find "${BUILD_DIR}/fonts" -name '*.ttf' -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}"
     fi
     log "Fonts installed to ${dest}"
 }
@@ -263,7 +264,6 @@ package_runner() {
     step "Packaging SteamFlow Runner"
     local output="${ROOT_DIR}/steamflow-runner-wine11-wow64.tar.gz"
     
-    # Write manifest
     cat > "${DIST_DIR}/MANIFEST.txt" <<MANIFEST
 SteamFlow WoW64 Wine Runner
 ===========================
@@ -287,14 +287,15 @@ MANIFEST
 # MAIN
 # ============================================================================================
 main() {
+    # MUST create build directory before running step/log functions that write to BUILD_LOG
+    mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
+    : > "${BUILD_LOG}"
+
     step "Starting SteamFlow WoW64 Wine 11 Master Runner Build"
     log "Root directory: ${ROOT_DIR}"
     log "Build directory: ${BUILD_DIR}"
     log "Dist directory: ${DIST_DIR}"
     log "Wine source: ${WINE_GIT_URL} @ ${WINE_COMMIT:-HEAD}"
-    
-    mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
-    : > "${BUILD_LOG}"
     
     # Fetch assets sequentially to preserve clean logs
     fetch_wine_source
