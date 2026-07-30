@@ -63,14 +63,17 @@ jobs:
           sed -i 's/^function build_vrclient {/function build_vrclient { return 0;/' proton-tkg.sh
           sed -i 's/^function build_mediaconverter {/function build_mediaconverter { return 0;/' proton-tkg.sh
 
-          # 3. Preserve valid syntax in GStreamer move/strip conditionals
+          # 3. Neutralize attempts to patch the Valve Proton tree when cloning is skipped
+          sed -i 's|cd.*Proton.*patch|true|g' proton-tkg.sh
+
+          # 4. Preserve valid syntax in GStreamer move/strip conditionals
           sed -i 's|strip --strip-unneeded "$_nowhere"/gst.*|true|g' proton-tkg.sh
           sed -i 's|mv "$_nowhere"/gst.*|true|g' proton-tkg.sh
 
-          # 4. Truncate outdated Proton redirect patches that conflict with upstream Wine 11 master
+          # 5. Truncate outdated Proton redirect patches that conflict with upstream Wine 11 master
           find "$GITHUB_WORKSPACE" -type f \( -name "*steamclient-swap*" -o -name "proton-tkg.patch" -o -name "proton-steam-bits-non-protonify.patch" \) -exec truncate -s 0 {} +
 
-          # 5. Generate unified configuration targeting Upstream Wine Master
+          # 6. Generate unified configuration targeting Upstream Wine Master
           cat << "EOF" > proton-tkg.cfg
           _LOCAL_PRESET="none"
           _custom_wine_source="https://gitlab.winehq.org/wine/wine.git"
@@ -95,7 +98,7 @@ jobs:
           mkdir -p proton-tkg-profiles
           cp proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg
 
-          # 6. Execute build script capturing exit code correctly
+          # 7. Execute build script capturing exit code correctly
           export MAKEFLAGS="-j$(nproc)"
           set -o pipefail
           yes | ./proton-tkg.sh 2>&1 | tee build.log
