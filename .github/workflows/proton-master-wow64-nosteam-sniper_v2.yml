@@ -45,6 +45,7 @@ jobs:
             mesa \
             wayland \
             wayland-protocols \
+            fontforge \
             mingw-w64-gcc
           # Setup non-root build user and transfer workspace ownership
           useradd -m user && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
