@@ -120,7 +120,7 @@ jobs:
 
             # Execute build and log stdout/stderr
             set -o pipefail
-            yes | ./proton-tkg.sh 2>&1 | tee build.log
+            yes | ./proton-tkg.sh nocontainer 2>&1 | tee build.log
             build_rc=${PIPESTATUS[1]}
 
             # Record which commit the wine source actually landed on, so a
