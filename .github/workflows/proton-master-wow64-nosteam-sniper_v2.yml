@@ -144,6 +144,17 @@ jobs:
               # __wine_set_unix_env chain of failures we hit chasing patch
               # compatibility for a feature this build was never going to use.
               printf "%s\n" "_unfrog=\"true\""
+              # _proton_fs_hack defaults to "true" in proton-tkg.cfg and is
+              # what triggers applying valve_proton_fullscreen_hack /
+              # FS_bypass_compositor (prepare.sh lines 923/1015) -- a
+              # SEPARATE version-pinned patch cascade from steamclient-swap,
+              # not covered by _unfrog. It failed the same way (usage without
+              # declaration, net_wm_bypass_compositor undeclared) for the same
+              # underlying reason: a patch written against an older wine
+              # commit applied against live master. This is a compositor-
+              # bypass performance optimization, not something this build
+              # needs, so disable it rather than chase version drift again.
+              printf "%s\n" "_proton_fs_hack=\"false\""
             } | tee -a proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg > /dev/null
 
             # Stub out only the actual call sites (proton-tkg.sh line ~1114 and
