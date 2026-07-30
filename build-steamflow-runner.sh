@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # build-steamflow-runner.sh - Standalone WoW64 Wine 11 Master runner for SteamFlow
-# Targets: Wine 11 Master (HEAD), pure WoW64 mode, no Valve Linux Steam bridge binaries
+# Targets: Wine 11 Master (HEAD), pure WoW64 mode, DXVK, VKD3D-Proton, DXVK-NVAPI, D7VK
 
 set -euo pipefail
 
@@ -8,13 +8,15 @@ set -euo pipefail
 ROOT_DIR="${PWD}"
 
 # ============================================================================================
-# VERSION PINS - Update these for component version bumps
+# VERSION PINS - Update these for component version bumps (empty = latest GitHub release)
 # ============================================================================================
 WINE_GIT_URL="https://gitlab.winehq.org/wine/wine.git"
 WINE_COMMIT="${WINE_COMMIT:-}"  # Empty = HEAD (master)
 
 DXVK_VERSION="${DXVK_VERSION:-}"
 VKD3D_VERSION="${VKD3D_VERSION:-}"
+DXVK_NVAPI_VERSION="${DXVK_NVAPI_VERSION:-}"
+D7VK_VERSION="${D7VK_VERSION:-}"
 WINE_MONO_VERSION="${WINE_MONO_VERSION:-}"
 WINE_GECKO_VERSION="${WINE_GECKO_VERSION:-2.47.4}"
 
@@ -27,6 +29,13 @@ WINE_SRC_DIR="${BUILD_DIR}/wine-git"
 BUILD_LOG="${BUILD_DIR}/build.log"
 WINE_TKG_DIR="${ROOT_DIR}/wine-tkg-git"
 
+# Track detected component versions for VERSIONS.txt
+DXVK_DETECTED_VER="unknown"
+VKD3D_DETECTED_VER="unknown"
+DXVK_NVAPI_DETECTED_VER="unknown"
+D7VK_DETECTED_VER="unknown"
+MONO_DETECTED_VER="unknown"
+
 # GCC 14 compatibility flags
 export CFLAGS="-O2 -pipe -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -fno-strict-aliasing"
 export CXXFLAGS="${CFLAGS} -Wno-error=attributes"
@@ -37,7 +46,7 @@ export CROSSLDFLAGS="${LDFLAGS}"
 export MAKEFLAGS="-j$(nproc)"
 
 # ============================================================================================
-# HELPER FUNCTIONS (Logging redirected to stderr so command substitutions stay clean)
+# HELPER FUNCTIONS (Logging redirected to stderr so stdout remains clean for string returns)
 # ============================================================================================
 log() { echo -e "\033[1;34m[build]\033[0m $*" | tee -a "${BUILD_LOG}" >&2; }
 warn() { echo -e "\033[1;33m[warn]\033[0m $*" | tee -a "${BUILD_LOG}" >&2; }
@@ -56,8 +65,8 @@ download() {
 download_github_latest() {
     local repo="$1" pattern="$2" dest_dir="$3" dest_file="${4:-}" tag="${5:-}"
     log "Fetching release info for ${repo}..."
-    local asset_url
-    asset_url=$(python3 -c "
+    local res
+    res=$(python3 -c "
 import urllib.request, json, re
 tag = '${tag}'
 url = f'https://api.github.com/repos/${repo}/releases/' + (f'tags/{tag}' if tag else 'latest')
@@ -66,19 +75,22 @@ try:
     with urllib.request.urlopen(req) as response:
         data = json.loads(response.read().decode())
         pattern = re.compile(r'${pattern}')
+        tag_name = data.get('tag_name', 'unknown')
         for asset in data.get('assets', []):
             if pattern.search(asset['name']):
-                print(asset['browser_download_url'])
+                print(f\"{asset['browser_download_url']}|{tag_name}\")
                 break
 except Exception as e:
     pass
 ")
-    if [[ -z "${asset_url}" ]]; then
+    if [[ -z "${res}" ]]; then
         err "Failed to find asset matching pattern '${pattern}' in ${repo}"
     fi
+    local asset_url="${res%%|*}"
+    local version_tag="${res##*|}"
     local outfile="${dest_dir}/${dest_file:-$(basename "${asset_url}")}"
     download "${asset_url}" "${outfile}"
-    echo "${outfile}"
+    echo "${outfile}|${version_tag}"
 }
 
 # ============================================================================================
@@ -113,47 +125,108 @@ fetch_wine_source() {
 
 fetch_dxvk() {
     step "Fetching DXVK"
-    local dest="${DIST_DIR}/lib64/wine/x86_64-windows"
-    mkdir -p "${dest}" "${BUILD_DIR}/dxvk"
-    local tarball
-    if [[ -n "${DXVK_VERSION}" ]]; then
-        tarball=$(download_github_latest "doitsujin/dxvk" "dxvk-.*\\.tar\\.gz" "${BUILD_DIR}/dxvk" "dxvk.tar.gz" "${DXVK_VERSION}")
-    else
-        tarball=$(download_github_latest "doitsujin/dxvk" "dxvk-.*\\.tar\\.gz" "${BUILD_DIR}/dxvk" "dxvk.tar.gz")
-    fi
-    log "Extracting DXVK..."
+    local dest_64="${DIST_DIR}/lib64/wine/x86_64-windows"
+    local dest_32="${DIST_DIR}/lib64/wine/i386-windows"
+    mkdir -p "${dest_64}" "${dest_32}" "${BUILD_DIR}/dxvk"
+    
+    local res tarball
+    res=$(download_github_latest "doitsujin/dxvk" "dxvk-.*\\.tar\\.gz$" "${BUILD_DIR}/dxvk" "dxvk.tar.gz" "${DXVK_VERSION}")
+    tarball="${res%%|*}"
+    DXVK_DETECTED_VER="${res##*|}"
+    
+    log "Extracting DXVK (${DXVK_DETECTED_VER})..."
     tar -xzf "${tarball}" -C "${BUILD_DIR}/dxvk" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x86_64/*' -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    log "DXVK DLLs installed to ${dest}"
+    
+    # 64-bit DLLs (dxgi, d3d11, d3d10core, d3d9, d3d8) -> system32
+    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLLs -> syswow64
+    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    
+    log "DXVK installed to ${dest_64} and ${dest_32}"
 }
 
 fetch_vkd3d() {
     step "Fetching VKD3D-Proton"
-    local dest="${DIST_DIR}/lib64/wine/x86_64-windows"
-    mkdir -p "${dest}" "${BUILD_DIR}/vkd3d"
-    local tarball
-    if [[ -n "${VKD3D_VERSION}" ]]; then
-        tarball=$(download_github_latest "HansKristian-Work/vkd3d-proton" "vkd3d-proton-.*\\.tar\\.zst" "${BUILD_DIR}/vkd3d" "vkd3d.tar.zst" "${VKD3D_VERSION}")
-    else
-        tarball=$(download_github_latest "HansKristian-Work/vkd3d-proton" "vkd3d-proton-.*\\.tar\\.zst" "${BUILD_DIR}/vkd3d" "vkd3d.tar.zst")
-    fi
-    log "Extracting VKD3D-Proton..."
+    local dest_64="${DIST_DIR}/lib64/wine/x86_64-windows"
+    local dest_32="${DIST_DIR}/lib64/wine/i386-windows"
+    mkdir -p "${dest_64}" "${dest_32}" "${BUILD_DIR}/vkd3d"
+    
+    local res tarball
+    res=$(download_github_latest "HansKristian-Work/vkd3d-proton" "vkd3d-proton-.*\\.tar\\.zst$" "${BUILD_DIR}/vkd3d" "vkd3d.tar.zst" "${VKD3D_VERSION}")
+    tarball="${res%%|*}"
+    VKD3D_DETECTED_VER="${res##*|}"
+    
+    log "Extracting VKD3D-Proton (${VKD3D_DETECTED_VER})..."
     tar -xf "${tarball}" -C "${BUILD_DIR}/vkd3d" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
-    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    log "VKD3D-Proton DLLs installed to ${dest}"
+    
+    # 64-bit DLLs (d3d12, d3d12core) -> system32
+    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLLs -> syswow64
+    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    
+    log "VKD3D-Proton installed to ${dest_64} and ${dest_32}"
+}
+
+fetch_dxvk_nvapi() {
+    step "Fetching DXVK-NVAPI"
+    local dest_64="${DIST_DIR}/lib64/wine/x86_64-windows"
+    local dest_32="${DIST_DIR}/lib64/wine/i386-windows"
+    mkdir -p "${dest_64}" "${dest_32}" "${BUILD_DIR}/dxvk-nvapi"
+    
+    local res tarball
+    res=$(download_github_latest "jp7677/dxvk-nvapi" "dxvk-nvapi-.*\\.tar\\.gz$" "${BUILD_DIR}/dxvk-nvapi" "dxvk-nvapi.tar.gz" "${DXVK_NVAPI_VERSION}")
+    tarball="${res%%|*}"
+    DXVK_NVAPI_DETECTED_VER="${res##*|}"
+    
+    log "Extracting DXVK-NVAPI (${DXVK_NVAPI_DETECTED_VER})..."
+    tar -xzf "${tarball}" -C "${BUILD_DIR}/dxvk-nvapi" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
+    
+    # 64-bit DLLs (nvapi64.dll, nvofapi64.dll) -> system32
+    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLLs (nvapi.dll) -> syswow64
+    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || \
+    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' -path '*/x32/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    
+    log "DXVK-NVAPI installed to ${dest_64} and ${dest_32}"
+}
+
+fetch_d7vk() {
+    step "Fetching D7VK (Direct3D 7 via Vulkan)"
+    local dest_64="${DIST_DIR}/lib64/wine/x86_64-windows"
+    local dest_32="${DIST_DIR}/lib64/wine/i386-windows"
+    mkdir -p "${dest_64}" "${dest_32}" "${BUILD_DIR}/d7vk"
+    
+    local res tarball
+    res=$(download_github_latest "WinterSnowfall/d7vk" "d7vk-.*\\.(zip|tar\\.gz)$" "${BUILD_DIR}/d7vk" "d7vk.archive" "${D7VK_VERSION}")
+    tarball="${res%%|*}"
+    D7VK_DETECTED_VER="${res##*|}"
+    
+    log "Extracting D7VK (${D7VK_DETECTED_VER})..."
+    if [[ "${tarball}" == *.zip ]]; then
+        python3 -c "import zipfile; zipfile.ZipFile('${tarball}').extractall('${BUILD_DIR}/d7vk')" 2>&1 | tee -a "${BUILD_LOG}"
+    else
+        tar -xf "${tarball}" -C "${BUILD_DIR}/d7vk" 2>&1 | tee -a "${BUILD_LOG}"
+    fi
+    
+    # 64-bit DLL (d3d7.dll) -> system32
+    find "${BUILD_DIR}/d7vk" -iname 'd3d7.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLL (d3d7.dll) -> syswow64
+    find "${BUILD_DIR}/d7vk" -iname 'd3d7.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || \
+    find "${BUILD_DIR}/d7vk" -iname 'd3d7.dll' -path '*/x32/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    
+    log "D7VK installed to ${dest_64} and ${dest_32}"
 }
 
 fetch_wine_mono() {
     step "Fetching Wine-Mono"
     local dest="${DIST_DIR}/share/wine/mono"
     mkdir -p "${dest}" "${BUILD_DIR}/mono"
-    local tarball
-    if [[ -n "${WINE_MONO_VERSION}" ]]; then
-        tarball=$(download_github_latest "wine-mono/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi" "${WINE_MONO_VERSION}")
-    else
-        tarball=$(download_github_latest "wine-mono/wine-mono" "wine-mono-.*\\.msi" "${BUILD_DIR}/mono" "wine-mono.msi")
-    fi
+    
+    local res tarball
+    res=$(download_github_latest "wine-mono/wine-mono" "wine-mono-.*\\.msi$" "${BUILD_DIR}/mono" "wine-mono.msi" "${WINE_MONO_VERSION}")
+    tarball="${res%%|*}"
+    MONO_DETECTED_VER="${res##*|}"
+    
     cp -v "${tarball}" "${dest}/" 2>&1 | tee -a "${BUILD_LOG}"
     log "Wine-Mono installed to ${dest}"
 }
@@ -178,7 +251,6 @@ fetch_fonts() {
     local dest="${DIST_DIR}/share/fonts"
     mkdir -p "${dest}" "${BUILD_DIR}/fonts"
     
-    # Check if system Liberation fonts exist (installed via pacman ttf-liberation)
     if find /usr/share/fonts -iname "Liberation*.ttf" -print -quit | grep -q .; then
         log "Using system Liberation fonts from pacman..."
         find /usr/share/fonts -iname "Liberation*.ttf" -exec cp -v -t "${dest}/" {} + 2>&1 | tee -a "${BUILD_LOG}"
@@ -200,7 +272,6 @@ build_wine() {
     step "Building Wine (WoW64 mode)"
     cd "${WINE_TKG_DIR}"
     
-    # Write configuration overrides directly to wine-tkg.cfg
     cat << EOF > wine-tkg.cfg
 _LOCAL_PRESET="none"
 _custom_wine_source="${WINE_GIT_URL}"
@@ -253,24 +324,40 @@ EOF
 }
 
 # ============================================================================================
-# PACKAGING
+# PACKAGING & MANIFEST
 # ============================================================================================
 package_runner() {
     step "Packaging SteamFlow Runner"
     local output="${ROOT_DIR}/steamflow-runner-wine11-wow64.tar.gz"
     
+    # 1. Parseable version key-value file for SteamFlow app
+    cat > "${DIST_DIR}/VERSIONS.txt" <<VERSIONS
+WINE_COMMIT=$(cat "${BUILD_DIR}/wine_commit.txt" 2>/dev/null || echo "unknown")
+DXVK_VERSION=${DXVK_DETECTED_VER}
+VKD3D_VERSION=${VKD3D_DETECTED_VER}
+DXVK_NVAPI_VERSION=${DXVK_NVAPI_DETECTED_VER}
+D7VK_VERSION=${D7VK_DETECTED_VER}
+WINE_MONO_VERSION=${MONO_DETECTED_VER}
+WINE_GECKO_VERSION=${WINE_GECKO_VERSION}
+BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+VERSIONS
+
+    # 2. Human-readable build summary
     cat > "${DIST_DIR}/MANIFEST.txt" <<MANIFEST
 SteamFlow WoW64 Wine Runner
 ===========================
-Wine: $(cat "${BUILD_DIR}/wine_commit.txt" 2>/dev/null || echo "unknown")
-DXVK: $(ls "${DIST_DIR}/lib64/wine/x86_64-windows"/dxvk*.dll 2>/dev/null | head -1 | xargs -r basename || echo "not found")
-VKD3D: $(ls "${DIST_DIR}/lib64/wine/x86_64-windows"/vkd3d*.dll 2>/dev/null | head -1 | xargs -r basename || echo "not found")
-Mono: $(ls "${DIST_DIR}/share/wine/mono"/wine-mono*.msi 2>/dev/null | head -1 | xargs -r basename || echo "not found")
-Gecko: $(ls "${DIST_DIR}/share/wine/gecko" 2>/dev/null | head -1 || echo "not found")
+Wine Commit: $(cat "${BUILD_DIR}/wine_commit.txt" 2>/dev/null || echo "unknown")
+DXVK: ${DXVK_DETECTED_VER}
+VKD3D: ${VKD3D_DETECTED_VER}
+DXVK-NVAPI: ${DXVK_NVAPI_DETECTED_VER}
+D7VK: ${D7VK_DETECTED_VER}
+Wine-Mono: ${MONO_DETECTED_VER}
+Wine-Gecko: ${WINE_GECKO_VERSION}
 Fonts: $(ls "${DIST_DIR}/share/fonts"/*.ttf 2>/dev/null | wc -l) files
 Built: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 MANIFEST
-    cat "${DIST_DIR}/MANIFEST.txt" | tee -a "${BUILD_LOG}"
+
+    cat "${DIST_DIR}/VERSIONS.txt" | tee -a "${BUILD_LOG}"
 
     log "Creating archive: ${output}"
     tar -czf "${output}" -C "${ROOT_DIR}/dist" steamflow-runner 2>&1 | tee -a "${BUILD_LOG}"
@@ -291,18 +378,22 @@ main() {
     log "Dist directory: ${DIST_DIR}"
     log "Wine source: ${WINE_GIT_URL} @ ${WINE_COMMIT:-HEAD}"
     
-    # Fetch assets sequentially
+    # Fetch graphics components
     fetch_wine_source
     fetch_dxvk
     fetch_vkd3d
+    fetch_dxvk_nvapi
+    fetch_d7vk
+    
+    # Fetch web / mono runtime components
     fetch_wine_mono
     fetch_wine_gecko
     fetch_fonts
     
-    # Compile Wine
+    # Compile Wine WoW64
     build_wine
     
-    # Package release artifact
+    # Package release artifact & generate VERSIONS.txt
     package_runner
     
     step "Build complete!"
