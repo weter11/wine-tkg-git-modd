@@ -14,25 +14,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # Force --noconfirm on every pacman call, system-wide, for the rest
-          # of the job -- including the later "Configure & Compile" step,
-          # which runs via `sudo -u user bash -c ...`. sudo often applies its
-          # own secure_path rather than the inherited $PATH, so a wrapper
-          # placed only at /usr/local/bin might not be found from inside that
-          # sudo context even though it works here. Replacing the real binary
-          # at its canonical /usr/bin/pacman path sidesteps that entirely.
-          #
-          # This exists because proton-tkg's own internal dependency
-          # installer (wine-tkg-git/wine-tkg-scripts/deps, function
-          # _install_pkg) calls bare "pacman -S${_confirm_str} --needed" with
-          # no --noconfirm, relying entirely on `yes` feeding stdin. That
-          # breaks the moment pacman needs a NUMBERED provider-choice prompt
-          # (e.g. picking between providers of a virtual package like "jack")
-          # instead of a Y/n one -- "y" is not a valid number, pacman
-          # reprompts forever, and `yes` never stops sending "y", hanging the
-          # runner. This hit us once before on the Valve workflow; it is back
-          # here because this file was rewritten from scratch and the fix did
-          # not carry over.
+          # System-wide pacman wrapper to prevent hanging on numbered provider prompts
           mv /usr/bin/pacman /usr/bin/pacman.real
           cat > /usr/bin/pacman <<'PACWRAP'
           #!/bin/bash
@@ -40,7 +22,7 @@ jobs:
           PACWRAP
           chmod +x /usr/bin/pacman
 
-          pacman -Syu --noconfirm --needed \
+          pacman -Syu --needed \
             base-devel \
             git \
             sudo \
@@ -74,6 +56,7 @@ jobs:
             fontforge \
             python-fonttools \
             mingw-w64-gcc
+
           # Setup non-root build user and transfer workspace ownership
           useradd -m user && echo "user ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown -R user:user "$GITHUB_WORKSPACE" /tmp
@@ -84,7 +67,7 @@ jobs:
             set -eu
             cd "$GITHUB_WORKSPACE/proton-tkg"
 
-            # Export environment variables - MUST use "y" for _no_steampath
+            # Export build environment overrides
             export _NOLIB32="wow64"
             export _no_steampath="y"
             export _steamvr_support="false"
@@ -94,30 +77,25 @@ jobs:
             export _ci_build="true"
             export MAKEFLAGS="-j$(nproc)"
 
-            # GCC 14 made -Wimplicit-function-declaration (and -Wimplicit-int)
-            # hard errors by default for C, where older GCC only warned. This
-            # pinned wine commit predates that GCC policy change, so any call
-            # site relying on an implicit declaration -- previously harmless --
-            # now fails the build. Downgrading back to a warning here is the
-            # same fix used by other projects hitting this after a toolchain
-            # bump (e.g. u-boot), and applies across the whole build via CFLAGS
-            # rather than needing a patch at every individual call site.
+            # GCC 14 compatibility flags for older C call sites
             export CFLAGS="-Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
 
-            # Append our overrides to the END of proton-tkg.cfg instead of
-            # replacing it outright ("> proton-tkg.cfg" was overwriting the
-            # entire file, which silently deleted real defaults we never
-            # meant to touch -- e.g. _wayland_driver="true", native Wayland
-            # driver support, not just XWayland). tee -a appends the same
-            # overrides to advanced-customization.cfg at the same time, since
-            # different variables have been observed being read from each file
-            #
-            # _plain_version is intentionally empty: it was only ever needed
-            # to land on a commit the steamclient-swap patch ancestor check
-            # would accept. With _unfrog="true" below skipping that patch
-            # entirely, there is no more reason to sit on an old, awkward
-            # commit -- track live wine master, which is what a "master wine"
-            # build should actually mean.
+            # 1. Force _steamvr_support="false" inside proton-tkg.sh to prevent OpenVR triggers
+            sed -i "s/_steamvr_support=\"true\"/_steamvr_support=\"false\"/g" proton-tkg.sh
+
+            # 2. Stub out build_vrclient and neutralize `cd Proton`
+            sed -i "s/^function build_vrclient {/function build_vrclient { return 0;/" proton-tkg.sh
+            sed -i "/^      build_vrclient\$/d" proton-tkg.sh
+            sed -i "s/cd Proton/true/g" proton-tkg.sh
+
+            # 3. Stub out Linux Steam bridge calls (lsteamclient / steamhelper)
+            sed -i "/^      build_lsteamclient\$/d" proton-tkg.sh
+            sed -i "/^      build_steamhelper\$/d" proton-tkg.sh
+
+            # 4. Teach proton-tkg.sh that _NOLIB32="wow64" skips 32-bit packaging paths
+            sed -i "s/if \[ \"\$_NOLIB32\" != \"true\" \]; then/if [ \"\$_NOLIB32\" != \"true\" ] \&\& [ \"\$_NOLIB32\" != \"wow64\" ]; then/g" proton-tkg.sh
+
+            # 5. Append overrides to configuration files
             mkdir -p proton-tkg-profiles
             {
               printf "%s\n" "_LOCAL_PRESET=\"none\""
@@ -133,55 +111,16 @@ jobs:
               printf "%s\n" "_build_mediaconv=\"false\""
               printf "%s\n" "uninstaller=\"true\""
               printf "%s\n" "autoinstall=\"true\""
-              # Skips the entire proton-tkg-steamclient-swap patch family
-              # (gated by prepare.sh:1035 on _unfrog != "true"), along with a
-              # few other Frogging-Family/proton-specific extras (LAA
-              # handling, some staging integration). This build already
-              # deletes build_lsteamclient/build_steamhelper below, so it
-              # does not want the steamclient bridge that patch exists to
-              # support -- skipping it avoids the whole nice_limit /
-              # steamclient_addr / GetPackagesByPackageFamily /
-              # __wine_set_unix_env chain of failures we hit chasing patch
-              # compatibility for a feature this build was never going to use.
               printf "%s\n" "_unfrog=\"true\""
-              # _proton_fs_hack defaults to "true" in proton-tkg.cfg and is
-              # what triggers applying valve_proton_fullscreen_hack /
-              # FS_bypass_compositor (prepare.sh lines 923/1015) -- a
-              # SEPARATE version-pinned patch cascade from steamclient-swap,
-              # not covered by _unfrog. It failed the same way (usage without
-              # declaration, net_wm_bypass_compositor undeclared) for the same
-              # underlying reason: a patch written against an older wine
-              # commit applied against live master. This is a compositor-
-              # bypass performance optimization, not something this build
-              # needs, so disable it rather than chase version drift again.
               printf "%s\n" "_proton_fs_hack=\"false\""
             } | tee -a proton-tkg.cfg proton-tkg-profiles/advanced-customization.cfg > /dev/null
 
-            # Stub out only the actual call sites (proton-tkg.sh line ~1114 and
-            # ~1117), not every line mentioning these names. A broad
-            # s/.*build_lsteamclient.*/.../ also matches the function
-            # DEFINITION line ("function build_lsteamclient {"), which would
-            # comment out the opening brace and leave the whole function body
-            # as orphaned top-level code that either fails to parse or runs
-            # unconditionally at script load. Anchoring to the exact
-            # 6-space-indented bare call line avoids that entirely.
-            # build_vrclient needs no sed at all: its only call site is already
-            # gated by "if [ \"$_steamvr_support\" = \"true\" ]", and nothing
-            # later in the script resets that flag, so _steamvr_support="false"
-            # above already skips it cleanly.
-            sed -i "/^      build_lsteamclient\$/d" proton-tkg.sh
-            sed -i "/^      build_steamhelper\$/d" proton-tkg.sh
-
-            # Execute build and log stdout/stderr
+            # Execute build
             set -o pipefail
             yes | ./proton-tkg.sh nocontainer 2>&1 | tee build.log
             build_rc=${PIPESTATUS[1]}
 
-            # Record which commit the wine source actually landed on, so a
-            # repeat failure can be diagnosed from evidence instead of
-            # re-deriving it from the cfg-sourcing chain again. The source
-            # directory is cloned early, well before compilation could fail,
-            # so it exists regardless of whether the build itself succeeded.
+            # Record checked out Wine commit
             _wdir=$(find . -maxdepth 1 -iname "wine-*" -type d 2>/dev/null | head -n1)
             if [ -n "$_wdir" ] && [ -e "$_wdir/.git" ]; then
               git -C "$_wdir" log -1 --oneline > wine_commit_actually_checked_out.log 2>&1 || true
