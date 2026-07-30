@@ -45,7 +45,12 @@ jobs:
           PACWRAP
           chmod +x /usr/bin/pacman
 
-          pacman -Syu --needed \
+          # Configure pacman retries and parallel downloads for mirror stability
+          sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 5/' /etc/pacman.conf
+          echo "Retries = 10" >> /etc/pacman.conf
+
+          # Force full database refresh (-Syyu) before pulling packages
+          pacman -Syyu --needed \
             base-devel \
             git \
             sudo \
