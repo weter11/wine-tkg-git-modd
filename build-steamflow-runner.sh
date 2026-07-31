@@ -191,28 +191,25 @@ fetch_dxvk_nvapi() {
 }
 
 fetch_d7vk() {
-    step "Fetching D7VK (Direct3D 7 via Vulkan)"
+    step "Fetching D7VK (Direct3D 7 / DDraw via Vulkan)"
     local dest_64="${DIST_DIR}/lib64/wine/x86_64-windows"
     local dest_32="${DIST_DIR}/lib64/wine/i386-windows"
     mkdir -p "${dest_64}" "${dest_32}" "${BUILD_DIR}/d7vk"
     
     local res tarball
-    res=$(download_github_latest "WinterSnowfall/d7vk" "d7vk-.*\\.(zip|tar\\.gz)$" "${BUILD_DIR}/d7vk" "d7vk.archive" "${D7VK_VERSION}")
+    res=$(download_github_latest "WinterSnowfall/d7vk" "d7vk-.*\\.zip$" "${BUILD_DIR}/d7vk" "d7vk.zip" "${D7VK_VERSION}")
     tarball="${res%%|*}"
     D7VK_DETECTED_VER="${res##*|}"
     
     log "Extracting D7VK (${D7VK_DETECTED_VER})..."
-    if [[ "${tarball}" == *.zip ]]; then
-        python3 -c "import zipfile; zipfile.ZipFile('${tarball}').extractall('${BUILD_DIR}/d7vk')" 2>&1 | tee -a "${BUILD_LOG}"
-    else
-        tar -xf "${tarball}" -C "${BUILD_DIR}/d7vk" 2>&1 | tee -a "${BUILD_LOG}"
-    fi
+    python3 -c "import zipfile; zipfile.ZipFile('${tarball}').extractall('${BUILD_DIR}/d7vk')" 2>&1 | tee -a "${BUILD_LOG}"
     
-    # 64-bit DLL (d3d7.dll) -> system32
-    find "${BUILD_DIR}/d7vk" -iname 'd3d7.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    # 32-bit DLL (d3d7.dll) -> syswow64
-    find "${BUILD_DIR}/d7vk" -iname 'd3d7.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || \
-    find "${BUILD_DIR}/d7vk" -iname 'd3d7.dll' -path '*/x32/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # D7VK provides ddraw.dll (translates DDraw / D3D7 / D3D6 / D3D5 / D3D3 to Vulkan via DXVK D3D9)
+    # 64-bit DLL -> system32
+    find "${BUILD_DIR}/d7vk" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLL -> syswow64
+    find "${BUILD_DIR}/d7vk" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || \
+    find "${BUILD_DIR}/d7vk" -name '*.dll' -path '*/x32/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
     
     log "D7VK installed to ${dest_64} and ${dest_32}"
 }
@@ -330,7 +327,7 @@ package_runner() {
     step "Packaging SteamFlow Runner"
     local output="${ROOT_DIR}/steamflow-runner-wine11-wow64.tar.gz"
     
-    # 1. Parseable version key-value file for SteamFlow app
+    # Parseable version key-value file for SteamFlow app
     cat > "${DIST_DIR}/VERSIONS.txt" <<VERSIONS
 WINE_COMMIT=$(cat "${BUILD_DIR}/wine_commit.txt" 2>/dev/null || echo "unknown")
 DXVK_VERSION=${DXVK_DETECTED_VER}
@@ -342,7 +339,7 @@ WINE_GECKO_VERSION=${WINE_GECKO_VERSION}
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 VERSIONS
 
-    # 2. Human-readable build summary
+    # Human-readable build summary
     cat > "${DIST_DIR}/MANIFEST.txt" <<MANIFEST
 SteamFlow WoW64 Wine Runner
 ===========================
