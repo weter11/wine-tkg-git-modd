@@ -45,11 +45,10 @@ jobs:
           PACWRAP
           chmod +x /usr/bin/pacman
 
-          # Configure pacman retries and parallel downloads for mirror stability
+          # Configure pacman retries and parallel downloads
           sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 5/' /etc/pacman.conf
           echo "Retries = 10" >> /etc/pacman.conf
 
-          # Force full database refresh (-Syyu) before pulling packages
           pacman -Syyu --needed \
             base-devel \
             git \
@@ -59,6 +58,7 @@ jobs:
             python \
             python-fonttools \
             fontforge \
+            ttf-liberation \
             rsync \
             wget \
             curl \
@@ -180,12 +180,12 @@ jobs:
             dist/steamflow-runner/MANIFEST.txt
           retention-days: 7
 
-      - name: Upload SteamFlow Runner artifact
+      - name: Upload SteamFlow Runner directory artifact
         if: success()
         uses: actions/upload-artifact@v7
         with:
           name: steamflow-runner-wine11-wow64
-          path: steamflow-runner-wine11-wow64.tar.gz
+          path: dist/steamflow-runner
           retention-days: 30
 
       - name: Create release (on tag push)
