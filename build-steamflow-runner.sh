@@ -137,10 +137,10 @@ fetch_dxvk() {
     log "Extracting DXVK (${DXVK_DETECTED_VER})..."
     tar -xzf "${tarball}" -C "${BUILD_DIR}/dxvk" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
     
-    # 64-bit DLLs (dxgi, d3d11, d3d10core, d3d9, d3d8) -> system32
-    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    # 32-bit DLLs -> syswow64
-    find "${BUILD_DIR}/dxvk" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 64-bit DLLs -> system32
+    find "${BUILD_DIR}/dxvk" -name '*.dll' \( -path '*/x64/*' -o -path '*/x86_64/*' \) -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLLs -> syswow64 (handles x32 and x86 paths)
+    find "${BUILD_DIR}/dxvk" -name '*.dll' \( -path '*/x32/*' -o -path '*/x86/*' -o -path '*/i386/*' \) -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
     
     log "DXVK installed to ${dest_64} and ${dest_32}"
 }
@@ -159,10 +159,10 @@ fetch_vkd3d() {
     log "Extracting VKD3D-Proton (${VKD3D_DETECTED_VER})..."
     tar -xf "${tarball}" -C "${BUILD_DIR}/vkd3d" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
     
-    # 64-bit DLLs (d3d12, d3d12core) -> system32
-    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    # 32-bit DLLs -> syswow64
-    find "${BUILD_DIR}/vkd3d" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 64-bit DLLs -> system32
+    find "${BUILD_DIR}/vkd3d" -name '*.dll' \( -path '*/x64/*' -o -path '*/x86_64/*' \) -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLLs -> syswow64 (handles x32 and x86 paths)
+    find "${BUILD_DIR}/vkd3d" -name '*.dll' \( -path '*/x32/*' -o -path '*/x86/*' -o -path '*/i386/*' \) -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
     
     log "VKD3D-Proton installed to ${dest_64} and ${dest_32}"
 }
@@ -181,11 +181,10 @@ fetch_dxvk_nvapi() {
     log "Extracting DXVK-NVAPI (${DXVK_NVAPI_DETECTED_VER})..."
     tar -xzf "${tarball}" -C "${BUILD_DIR}/dxvk-nvapi" --strip-components=1 2>&1 | tee -a "${BUILD_LOG}"
     
-    # 64-bit DLLs (nvapi64.dll, nvofapi64.dll) -> system32
-    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    # 32-bit DLLs (nvapi.dll) -> syswow64
-    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || \
-    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' -path '*/x32/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 64-bit DLLs -> system32
+    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' \( -path '*/x64/*' -o -path '*/x86_64/*' \) -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLLs -> syswow64
+    find "${BUILD_DIR}/dxvk-nvapi" -name '*.dll' \( -path '*/x32/*' -o -path '*/x86/*' -o -path '*/i386/*' \) -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
     
     log "DXVK-NVAPI installed to ${dest_64} and ${dest_32}"
 }
@@ -204,12 +203,10 @@ fetch_d7vk() {
     log "Extracting D7VK (${D7VK_DETECTED_VER})..."
     python3 -c "import zipfile; zipfile.ZipFile('${tarball}').extractall('${BUILD_DIR}/d7vk')" 2>&1 | tee -a "${BUILD_LOG}"
     
-    # D7VK provides ddraw.dll (translates DDraw / D3D7 / D3D6 / D3D5 / D3D3 to Vulkan via DXVK D3D9)
-    # 64-bit DLL -> system32
-    find "${BUILD_DIR}/d7vk" -name '*.dll' -path '*/x64/*' -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
-    # 32-bit DLL -> syswow64
-    find "${BUILD_DIR}/d7vk" -name '*.dll' -path '*/x86/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || \
-    find "${BUILD_DIR}/d7vk" -name '*.dll' -path '*/x32/*' -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 64-bit DLLs -> system32
+    find "${BUILD_DIR}/d7vk" -name '*.dll' \( -path '*/x64/*' -o -path '*/x86_64/*' \) -exec cp -v -t "${dest_64}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
+    # 32-bit DLLs -> syswow64
+    find "${BUILD_DIR}/d7vk" -name '*.dll' \( -path '*/x32/*' -o -path '*/x86/*' -o -path '*/i386/*' \) -exec cp -v -t "${dest_32}/" {} + 2>&1 | tee -a "${BUILD_LOG}" || true
     
     log "D7VK installed to ${dest_64} and ${dest_32}"
 }
@@ -327,11 +324,11 @@ package_runner() {
     step "Packaging SteamFlow Runner"
     local output="${ROOT_DIR}/steamflow-runner-wine11-wow64.tar.gz"
     
-    # Parseable version key-value file for SteamFlow app
+    # Parseable key-value file for SteamFlow
     cat > "${DIST_DIR}/VERSIONS.txt" <<VERSIONS
 WINE_COMMIT=$(cat "${BUILD_DIR}/wine_commit.txt" 2>/dev/null || echo "unknown")
 DXVK_VERSION=${DXVK_DETECTED_VER}
-VKD3D_VERSION=${VKD3D_DETECTED_VER}
+VKD3D_PROTON_VERSION=${VKD3D_DETECTED_VER}
 DXVK_NVAPI_VERSION=${DXVK_NVAPI_DETECTED_VER}
 D7VK_VERSION=${D7VK_DETECTED_VER}
 WINE_MONO_VERSION=${MONO_DETECTED_VER}
@@ -339,13 +336,13 @@ WINE_GECKO_VERSION=${WINE_GECKO_VERSION}
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 VERSIONS
 
-    # Human-readable build summary
+    # Human-readable summary
     cat > "${DIST_DIR}/MANIFEST.txt" <<MANIFEST
 SteamFlow WoW64 Wine Runner
 ===========================
 Wine Commit: $(cat "${BUILD_DIR}/wine_commit.txt" 2>/dev/null || echo "unknown")
 DXVK: ${DXVK_DETECTED_VER}
-VKD3D: ${VKD3D_DETECTED_VER}
+VKD3D-Proton: ${VKD3D_DETECTED_VER}
 DXVK-NVAPI: ${DXVK_NVAPI_DETECTED_VER}
 D7VK: ${D7VK_DETECTED_VER}
 Wine-Mono: ${MONO_DETECTED_VER}
@@ -356,7 +353,7 @@ MANIFEST
 
     cat "${DIST_DIR}/VERSIONS.txt" | tee -a "${BUILD_LOG}"
 
-    log "Creating archive: ${output}"
+    log "Creating release archive: ${output}"
     tar -czf "${output}" -C "${ROOT_DIR}/dist" steamflow-runner 2>&1 | tee -a "${BUILD_LOG}"
     log "Archive created: ${output}"
     ls -lh "${output}" | tee -a "${BUILD_LOG}"
@@ -375,22 +372,17 @@ main() {
     log "Dist directory: ${DIST_DIR}"
     log "Wine source: ${WINE_GIT_URL} @ ${WINE_COMMIT:-HEAD}"
     
-    # Fetch graphics components
     fetch_wine_source
     fetch_dxvk
     fetch_vkd3d
     fetch_dxvk_nvapi
     fetch_d7vk
     
-    # Fetch web / mono runtime components
     fetch_wine_mono
     fetch_wine_gecko
     fetch_fonts
     
-    # Compile Wine WoW64
     build_wine
-    
-    # Package release artifact & generate VERSIONS.txt
     package_runner
     
     step "Build complete!"
