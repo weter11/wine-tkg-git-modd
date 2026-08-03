@@ -1,0 +1,30 @@
+--- a/dlls/win32u/d3dkmt.c
++++ b/dlls/win32u/d3dkmt.c
+@@ -724,5 +724,26 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+ {
+-    FIXME( "(%p): stub\n", stats );
++    TRACE( "(%p): returning dummy adapter statistics\n", stats );
++
++    if (!stats) return STATUS_INVALID_PARAMETER;
++
++    /* Zero the whole buffer first so games that read the result never see
++     * garbage, then populate plausible dummy values. The RE Engine
++     * (Resident Evil 2/3/7, etc.) queries adapter statistics during renderer
++     * init and dereferences the result; the empty stub made it read a null
++     * structure and crash (re2.exe+0x1f543d6, movq 8(%rcx) with rcx=0). */
++    memset( stats, 0, sizeof(*stats) );
++
++    /* D3DKMT_QUERYSTATISTICS_PROCESS_ADAPTER / _PROCESS_SEGMENT queries:
++     * the game reads NbSegments/NodeCount/VidPnSourceCount and iterates
++     * over them — a zero count makes it dereference a null segment table. */
++    stats->QueryResult.ProcessAdapterInformation.NbSegments = 1;
++    stats->QueryResult.ProcessAdapterInformation.NodeCount = 1;
++    stats->QueryResult.ProcessAdapterInformation.VidPnSourceCount = 1;
++    stats->QueryResult.ProcessAdapterInformation.CommitmentData.BytesBySegmentPreference[0] = 0x40000000;
++    stats->QueryResult.ProcessAdapterInformation.CommitmentData.BytesBySegmentPreference[1] = 0x10000000;
++    stats->QueryResult.ProcessAdapterInformation._Policy.PreferAperture[0] = 1;
++    stats->QueryResult.ProcessAdapterInformation._Policy.PreferApertureForRead[0] = 1;
++
+     return STATUS_SUCCESS;
+ }
