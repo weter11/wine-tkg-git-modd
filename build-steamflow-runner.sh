@@ -265,8 +265,13 @@ fetch_fonts() {
 build_wine() {
     step "Building Wine (WoW64 mode)"
     cd "${WINE_TKG_DIR}"
-    
-    cat << EOF > wine-tkg.cfg
+
+    # IMPORTANT: the non-makepkg path sources customization.cfg (prepare.sh
+    # _init: source "$_where"/customization.cfg), NOT a root wine-tkg.cfg.
+    # Writing to the wrong file silently drops every setting below (the
+    # runner was previously built with _use_staging=true from the default
+    # customization.cfg, and userpatches were never confirmed/applied).
+    cat << EOF > customization.cfg
 _LOCAL_PRESET="none"
 _custom_wine_source="${WINE_GIT_URL}"
 _plain_version="${WINE_COMMIT}"
@@ -279,6 +284,7 @@ _proton_use_steamhelper="false"
 _steamvr_support="false"
 _no_container="true"
 _ci_build="true"
+_user_patches_no_confirm="true"
 _NOLIB32="wow64"
 _no_steampath="y"
 _no_autoinstall="true"
@@ -292,6 +298,54 @@ _use_esync="false"
 _use_fsync="false"
 _steamclient_noswap="false"
 EOF
+
+    # ------------------------------------------------------------------
+    # d3dkmt QueryStatistics patch (self-contained, written at build time)
+    # ------------------------------------------------------------------
+    # NtGdiDdDDIQueryStatistics is an empty stub in wine (returns STATUS_SUCCESS
+    # without writing the output buffer). The RE Engine (Resident Evil 2/3/7)
+    # queries adapter statistics during renderer init and dereferences the
+    # result -> null+8 crash at re2.exe+0x1f543d6. This patch zeroes the buffer
+    # and fills ProcessAdapterInformation with plausible dummy values so the
+    # game sees a valid 1-segment adapter.
+    #
+    # The non-makepkg path picks up *.mypatch from wine-tkg-userpatches/ and
+    # applies them with patch -p1 (user_patcher). _user_patches_no_confirm=true
+    # (set in customization.cfg above) makes the apply unconditional in CI.
+    mkdir -p "${WINE_TKG_DIR}/wine-tkg-userpatches"
+    cat > "${WINE_TKG_DIR}/wine-tkg-userpatches/d3dkmt_query_stats.mypatch" << 'PATCH_EOF'
+--- a/dlls/win32u/d3dkmt.c
++++ b/dlls/win32u/d3dkmt.c
+@@ -724,5 +724,26 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+ {
+-    FIXME( "(%p): stub\n", stats );
++    TRACE( "(%p): returning dummy adapter statistics\n", stats );
++
++    if (!stats) return STATUS_INVALID_PARAMETER;
++
++    /* Zero the whole buffer first so games that read the result never see
++     * garbage, then populate plausible dummy values. The RE Engine
++     * (Resident Evil 2/3/7, etc.) queries adapter statistics during renderer
++     * init and dereferences the result; the empty stub made it read a null
++     * structure and crash (re2.exe+0x1f543d6, movq 8(%rcx) with rcx=0). */
++    memset( stats, 0, sizeof(*stats) );
++
++    /* D3DKMT_QUERYSTATISTICS_PROCESS_ADAPTER / _PROCESS_SEGMENT queries:
++     * the game reads NbSegments/NodeCount/VidPnSourceCount and iterates
++     * over them — a zero count makes it dereference a null segment table. */
++    stats->QueryResult.ProcessAdapterInformation.NbSegments = 1;
++    stats->QueryResult.ProcessAdapterInformation.NodeCount = 1;
++    stats->QueryResult.ProcessAdapterInformation.VidPnSourceCount = 1;
++    stats->QueryResult.ProcessAdapterInformation.CommitmentData.BytesBySegmentPreference[0] = 0x40000000;
++    stats->QueryResult.ProcessAdapterInformation.CommitmentData.BytesBySegmentPreference[1] = 0x10000000;
++    stats->QueryResult.ProcessAdapterInformation._Policy.PreferAperture[0] = 1;
++    stats->QueryResult.ProcessAdapterInformation._Policy.PreferApertureForRead[0] = 1;
++
+     return STATUS_SUCCESS;
+ }
+PATCH_EOF
+    log "Wrote d3dkmt_query_stats.mypatch to wine-tkg-userpatches/"
 
     export _where="${WINE_TKG_DIR}"
     export srcdir="${BUILD_DIR}"
