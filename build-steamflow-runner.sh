@@ -299,6 +299,10 @@ _use_fsync="false"
 _steamclient_noswap="false"
 EOF
 
+    # advanced-customization.cfg is sourced after customization.cfg and resets
+    # this option to false by default, so override it in the final config layer.
+    printf '\n_user_patches_no_confirm="true"\n' >> wine-tkg-profiles/advanced-customization.cfg
+
     # ------------------------------------------------------------------
     # d3dkmt QueryStatistics patch (self-contained, written at build time)
     # ------------------------------------------------------------------
