@@ -4,9 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       wine_commit:
-        description: "Wine commit hash to build (empty = HEAD)"
+        description: "Wine commit hash to build (default = a011ce5724, the staging base)"
         required: false
         type: string
+        default: "a011ce5724"
       dxvk_version:
         description: "DXVK version tag (empty = latest)"
         required: false

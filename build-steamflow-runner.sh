@@ -11,7 +11,7 @@ ROOT_DIR="${PWD}"
 # VERSION PINS - Update these for component version bumps (empty = latest GitHub release)
 # ============================================================================================
 WINE_GIT_URL="https://gitlab.winehq.org/wine/wine.git"
-WINE_COMMIT="${WINE_COMMIT:-}"  # Empty = HEAD (master)
+WINE_COMMIT="${WINE_COMMIT:-a011ce5724}"  # Staging base (Build #12 known-good commit); empty = HEAD (master)
 
 DXVK_VERSION="${DXVK_VERSION:-}"
 VKD3D_VERSION="${VKD3D_VERSION:-}"
@@ -119,7 +119,7 @@ fetch_wine_source() {
     fi
     local actual_commit
     actual_commit=$(git -C "${workdir}" rev-parse HEAD)
-    log "Wine commit: ${actual_commit}"
+    log "Wine commit: ${actual_commit} (staging base a011ce5724)"
     echo "${actual_commit}" > "${BUILD_DIR}/wine_commit.txt"
 }
 
@@ -271,11 +271,19 @@ build_wine() {
     # Writing to the wrong file silently drops every setting below (the
     # runner was previously built with _use_staging=true from the default
     # customization.cfg, and userpatches were never confirmed/applied).
+    #
+    # This build uses the staging base a011ce5724 (Build #12 known-good
+    # commit) with staging enabled (_use_staging="true") plus the
+    # d3dkmt_query_stats.mypatch for RE Engine compatibility.
+    # _staging_upstreamignore="true" ensures the wine commit pin is
+    # honored even when staging is active (prepare.sh:616 skips the
+    # "reset to staging base" step, so the pin lands unconditionally).
     cat << EOF > customization.cfg
 _LOCAL_PRESET="none"
 _custom_wine_source="${WINE_GIT_URL}"
 _plain_version="${WINE_COMMIT}"
-_use_staging="false"
+_use_staging="true"
+_staging_upstreamignore="true"
 _unfrog="true"
 _protonify="true"
 _proton_fsync="true"
