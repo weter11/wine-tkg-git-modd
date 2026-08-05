@@ -157,10 +157,24 @@ context object the runner's minimal build never creates. See next section.
   init is D3DKMT-only (18 `NtGdiDdDDI*` hits, OpenAdapterFromDeviceName + QueryStatistics
   only).
 - Game-side binary patch hypothesis for `0x1491b0050`: **REJECTED** (see §3).
+- **QueryStatistics capture (2026-08-05, gdb, all 6 calls on b16):** the game queries 3 GPUs
+  (LUID HighParts `0x3f5/0x456/0x457`), each with `D3DKMT_QUERYSTATISTICS_ADAPTER` (Type 0,
+  calls 1-3) then `_ADAPTER_SEGMENT` (Type 3, calls 4-6). b16's dummy fill works but its
+  memset-first approach **clobbers the input header** (Type returned 0 for calls 4-6,
+  AdapterLuid wiped). **Fixed in b17** (commit `c2c1c788`+`fc7d9fd3`): save/restore
+  Type+AdapterLuid around the memset, TRACE logs `type %u, adapter luid %08x:%08x`.
 - Next lever: runner's `d3d12.dll`/`dxgi.dll` (VKD3D-Proton) `DLL_PROCESS_ATTACH` behavior and
   whether the device-context constructor populates the external adapter struct; verify
   `WINEDLLOVERRIDES` mapping (`d3d12=n,b; d3d12core=n,b; dxgi=n,b` present in
   `effective_launch_config.json`).
+- **DLL attach verdict (2026-08-05):** `dxgi.dll`+`d3d11.dll` DO get `DLL_PROCESS_ATTACH`
+  (relay-verified) but both entries are the minimal wine stub (RVA 0x11f0: config-key reads
+  only, no D3DKMT/device work). `d3d12.dll` (VKD3D-Proton forwarder shim → `d3d12core.dll`
+  via `LoadLibraryA`+`GetProcAddress`) is **never attached** — re2.exe imports `dxgi.dll` +
+  `d3d11.dll` but NOT `d3d12.dll` statically, and zero graphics calls occur pre-crash. So
+  the runner's DLLs execute no adapter/device setup in the crashing window; the
+  `0x1491b0050` writer must be game-side code that never runs under wine, or a wine D3DKMT
+  data-shape gap.
 
 ---
 
