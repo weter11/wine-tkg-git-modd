@@ -439,6 +439,37 @@ against, matching Proton exactly. Test in b18 via SteamFlow; if the crash
 moves (it may, if the game now picks a different init branch), the new site
 feeds the next round.
 
+### 8.6 b18 empirical result (2026-08-05) — parity patch LIVE, crash UNCHANGED
+
+Runner `steamflow-runner-wine11-wow64` rebuilt (BUILD_DATE 2026-08-05T09:52:09Z,
+WINE_COMMIT `a011ce5724`, DXVK v3.0.2, VKD3D-Proton v3.0.1, DXVK-NVAPI v0.9.2).
+Verified in the installed binary:
+
+- `strings win32u.so` → `WINE_DISABLE_HARDWARE_SCHEDULING` (parity patch §8.4
+  item 3 landed) AND `(%p): type %u, adapter luid %08x:%08x` (b17
+  query-stats TRACE landed). Both mypatches are in the shipped win32u.so.
+
+Launch via SteamFlow (log `logs/wine_883710.log`, 08:17):
+
+```
+04fc:warn:module:find_builtin_dll cannot find builtin library for L"\\??\\Z:\\home\\wer\\.steam\\steam\\steamapps\\common\\Resident Evil 2\\amd_ags_x64.dll"
+04fc:warn:module:LdrGetProcedureAddress "Steam_ReleaseThreadLocalMemory" (ordinal 0) not found in L"Z:\\...\\re2.exe"
+...
+wine: Unhandled page fault on read access to 0000000000000008 at address 0000000141F543D6 (thread 04fc), starting debugger...
+```
+
+**Crash is byte-identical at `0x141f543d6`** — `table[1]` still NULL, exactly as
+§8.4 predicted. The Proton-parity patch changes wine's D3DKMT surface
+(WDDM 1.3 pin, WDDM_2_7_CAPS/HwSch, llvmpipe exclusion) but the game's
+record-tagging still never happens: field8 tags come from game-internal static
+templating, not from any win32u D3DKMT parameter (watchpoint-proven, §1–§6).
+
+**Conclusion of the Proton-parity experiment:** the "Proton adapter-handle
+difference" hypothesis is now REFUTED empirically, not just at the source
+level (§8.1). No win32u userpatch can populate `table[1]`. The remaining levers
+are §7.1's game-side tagging path (a path that under this runner never
+executes) — outside win32u's reach.
+
 ### 8.5 Reusable tooling added this session
 
 - `re2iat_dump.py` — correct IAT name resolution (bit-63 ordinal vs
