@@ -713,3 +713,112 @@ sub-question: the Windows tagging path is purely game-internal.
   `/tmp/tkg_ntdll_unix_virtual.c` / `_loader.c` — extracted ntdll sources for
   diff (Proton 11.0 vs pinned a011ce5724).
 - `re2f8chk.py` — field8 index/size-field decode.
+
+---
+
+## 11. Dynamic tag construction & SetupDi gates (§11) — ROOT CAUSE FOUND
+
+**Status: COMPLETE — the crash is a CORRUPTED GAME INSTALL, not a wine/Proton
+defect.** The analyzed binary (REFramework/cracked copy) is NOT the binary
+that crashes. The running Steam copy has a **4,046,936-byte zeroed region** in
+`.data` covering the records-table tail — the tag-1 record is gone, so
+`table[1]` = NULL and the fill loop crashes. §1-§10 analyzed the wrong
+(cracked, complete) binary.
+
+### 11.1 The tag records ARE baked in the file — my earlier scans were wrong
+
+The fill loop bound is `template[0xC] = 0x13677` = **79,479 records**, not 32.
+Scanning ALL records in the complete (cracked) binary:
+
+- **91 tagged records** (tags 1-91, exactly one each) at records 1374, 1964,
+  3081, 4238, 59495 (tag 1), 77677 (tag 2), 70783 (tag 3), 73646 (tag 6) ...
+- field8 = `idx36<<36 | tag<<54` — e.g. rec 59495: `0x004000200000ff20`,
+  tag = `(f8>>54)&0x3ff = 1`.
+- The "tag" IS baked; the game never constructs `ptr | (tag<<54)` at runtime.
+- **No `shl $0x36`, no `bts $0x36`, no `movabs 2^54`** exists anywhere in
+  .text (the single movabs 2^54 hit is a bit-reversal utility at
+  `0x1454dab43`). §11's premise ("tag MUST be constructed dynamically") is
+  FALSE for the complete binary — tags are compile-time constants.
+
+### 11.2 The running Steam binary has a truncated records table
+
+| | Steam copy (RUNNING, crashes) | REFramework copy (analyzed, complete) |
+|---|---|---|
+| path | `~/.steam/.../Resident Evil 2/re2.exe` | `/home/wer/Games/PC/.../reframework/re2.exe` |
+| mtime | 2026-03-11 | 2023-08-31 |
+| .text md5 | `7ff33c4a...` | `7ff33c4a...` (IDENTICAL) |
+| .data sha1 | `4042b230...` | `4a684746...` (DIFFERENT) |
+| PE ts / csum | 0x64a57a1e / 0x96bc3e4 | same / same |
+| tagged records | **25** (tags 0x40-0x64 subset) | **91** (tags 1-91) |
+| tag 1 record | **ABSENT** (rec 59495 = zeros) | present |
+| last nonzero rec | **28873** | 79478 |
+
+The difference is **100% one-directional**: `steam=0, refr≠0` = 1,626,493
+bytes; `steam≠0, refr=0` = 0. The Steam copy has a **contiguous 0x3dc658-byte
+zero run** from RVA `0x7612ba8` (rec 28874) to the end of the records table
+(`0x79ef200`) — a clean truncation covering **50,605 records**, including
+tags 1, 2, 3, 6, 7, 11... which the fill loop needs.
+
+### 11.3 Why this causes the crash
+
+The instantiator `0x141f54270`:
+1. Copies template (0xE0 B) to BSS `0x1491b02a0`; `[0x1491b0300]` =
+   template[0x60] fixup = **`0x1473decd0`** (records table, static .data).
+2. Fill loop (i = 1..79478): `field8 = [0x1473decd0 + i*80 + 8]`;
+   `tag = (field8>>54)&0x3ff`; if tag != 0 → `table[tag] = &record[i]`
+   (table @ RVA `0x91aff50`).
+3. Consumer: `rcx = table[idxA]` where idxA=1 (first GPU-index entry);
+   `mov rax, [rcx+8]` → **NULL deref at `0x141f543d6`**.
+
+In the Steam copy, records 28874+ are zeros → no tag-1 record → `table[1]`
+stays NULL → crash. The watch captures confirm runtime memory matches the
+file: `[0x1491b0300] = 0x1473decd0`, `[0x1491b0308] = 0x1482e78d0` at crash.
+
+### 11.4 SetupDi gate — not the cause
+
+The `SetupDi*` + D3DKMT enumeration (`0x14200c811`) builds the per-GPU
+object-list vector (`0x1491b0458`), which is a **different structure** from
+the records table. It runs fine under wine (b17 capture: 6 QueryStatistics
+calls, 3 LUIDs echoed). It never touches field8/tags. The records table is
+**static .data, read-only at runtime** (0 RIP-relative writers, 0 disp32
+refs, deserializer only fixes template pointer fields +0x58..+0xA8). SetupDi
+return values do not gate the tagging — there is no runtime tagging pass.
+
+### 11.5 The real story: two installs, one corrupted
+
+- `/home/wer/Games/PC/RESIDENT EVIL 2  BIOHAZARD RE2/` contains
+  `Crack/`, `steam_settings/`, `RE2.zip` — a **cracked copy** (2023 build)
+  with the complete 91-tag records table. This is the binary all §1-§10
+  analysis used.
+- `/home/wer/.steam/steam/steamapps/common/Resident Evil 2/` — the **legit
+  Steam install** (30G, appmanifest 883710, StateFlags 4 = Fully Installed),
+  exe mtime 2026-03-11, with the zeroed records-table tail.
+- SteamFlow launches the **Steam install** (confirmed by
+  `effective_launch_config.json` → `install_dir` =
+  `.../common/Resident Evil 2`). Both installs run REFramework
+  (`re2_framework_log.txt` in the Steam dir shows `TDB: 1473de9d0`).
+- The Steam exe's .data was **zeroed from RVA 0x7612ba8** — a ~4MB clean
+  truncation. Causes consistent with this: interrupted/partial Steam update
+  (exe mtime 2026-03-11, last Steam activity 2026-02-14 per content_log),
+  disk-full during repair (home partition is 100% full, 14G free), or a
+  failed REFramework/integrity-bypass write. The PE checksum field is
+  non-zero but wine does not validate it.
+
+### 11.6 Fix (user action)
+
+**Verify the game files in Steam** (`steam steam://validate/883710` or
+Properties → Local Files → Verify integrity). This will re-download the
+corrupted re2.exe (and any other depot files) and restore the records-table
+tags. Alternative: copy the complete re2.exe from the cracked install
+(identical .text, complete .data) — but Steam Verify is the clean fix.
+No wine/win32u/VKD3D/Proton change is required.
+
+### 11.7 Why this invalidates §1-§10 conclusions
+
+All prior sections analyzed the cracked copy — which does NOT crash (it has
+all 91 tags). The "watchpoint proof" that field8 tags are 0 by construction,
+the "no writer exists" scans, the Proton-parity userpatch (b18), and the
+ntdll diff (b19) were all performed against a binary whose records table
+differs from the one that crashes. The wine-side investigation was
+methodologically sound but aimed at the wrong artifact. The crash is a
+**game-file corruption issue**, reproducible under any runner.
