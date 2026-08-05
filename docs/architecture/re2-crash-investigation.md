@@ -234,3 +234,86 @@ Proven recipe (gdb under launch; gdb must be parent — Yama ptrace_scope=1 bloc
 - `re2_firstinit_probe.txt` — factory/first-init probe
 - `re2_full_relay.log` — 179MB relay (AGS never called, D3DKMT-only pre-crash)
 - `re2_gdb_backtrace.txt` — original SIGSEGV capture
+
+---
+
+## 6. Post-OpenAdapter record construction — static-data deserializer (investigation COMPLETE)
+
+**Status: COMPLETE (2026-08-05).** The record builder feeds strictly from static `.data`
+templates; no `OpenAdapter` handle or runtime LUID ever populates `rec.field8`. The
+`(field8>>54)&0x3ff` tag is therefore **always 0 by construction** under wine — a game-side
+expectation mismatch, not a wine D3DKMT data defect.
+
+### 6.1 Record instantiator — `0x141f54270`
+
+Copies **0xE0 bytes per record** (0x80 + 0x60) from two source regions into the
+`0x1491b02a0+` record array:
+
+```
+141f5428c: movups (%rcx),%xmm0         ; source A: 8×16B = 0x80 bytes
+141f542a0: movups %xmm0,0x91b02a0(%r11) ; → dest 0x1491b02a0 (records area)
+141f542a8: lea 0x91b02a0(%r11),%rdx
+141f542b3: lea 0x80(%rdx),%rdx          ; stride 0x80
+... 14 more movups (source B = rcx+0x80 → dest+0x80), last qword at 0x141f54320
+```
+
+Called from the orchestrator `0x141f7fbd3` (fn `0x141f7f870`, crash backtrace frame #2).
+The watchpoint-verified writes to `0x1491b0308/0x1491b0358` (field8 of rec0/rec1) are the
+`movups` at `0x141f542e6/0x141f5430c` — the records ARE built, but from the static
+template, not from any D3DKMT result.
+
+### 6.2 "TDB" deserializer — `0x141f54590`
+
+Validates the magic header and performs **self-relative pointer fixups**:
+
+```
+141f54590: cmpl $0x424454,(%rcx)        ; "TDB" magic — else return 0
+141f545a4: cmpl $0x46,0x4(%rcx)         ; size check
+141f545aa: mov 0x58(%rcx),%rax
+141f545b0: lea (%rax,%rcx,1),%r8        ; r8 = base + field58
+141f545bc: mov 0x60(%rcx),%rax
+141f545c9: add %rcx,%rax                ; field60 = base + field60
+141f545d5: mov 0x68(%rcx),%rax
+141f545de: add %rcx,%rax                ; field68 = base + field68
+141f545e6: mov %rax,0x68(%rcx)          ; ← field8 source = src+0x68 = 0x1473dea38
+... (same pattern for +0x70, ...)
+```
+
+Each non-zero field at +0x58/+0x60/+0x68/+0x70 gets `field += struct_base`. For field8:
+`0x1473de9d0 + 0xF08C00 = 0x1482E78D0` — an **in-image pointer**, computed by the game
+itself. Wine is never consulted.
+
+### 6.3 Static-data provenance (full chain, call-graph closed)
+
+```
+14087f1ed: lea 0x1473de9d0,%rdx          ; ← STATIC .data TDB template (baked constants)
+14087f1f7: call 0x141f7f870              ; orchestrator(rcx=[0x149178e98], rdx=template)
+  141f7f889: mov %rdx,%rsi               ; rsi = template
+  141f7f899: call 0x141f54590            ; "TDB" deserializer (magic + fixups)
+  141f7fbc7: mov %rsi,0x35d8(%r15)
+  141f7fbce: call 0x141f54270            ; copy 0xE0-byte records
+```
+
+- Source = compile-time `.data` (RVA `0x73de9d8` file bytes `00 00 00 00 77 36 01 00 …`
+  byte-identical to runtime; LUID-like constants `0x13677/0x1c757/0x13d5b/0x4aff` never
+  written at runtime — watchpoint never fired).
+- `0x1491b02ac` (record count) and `0x1491b0300` (records base) have **no RIP-relative
+  writers** — same class as `0x1491b0050`; they live in the same BSS region and are written
+  by the copy function via `r11`-relative addressing (`0x91b02a0(%r11)`, objdump-annotated).
+- **No code path packs hAdapter/LUID/index into field8's bits 54–63.** 0 stores targeting it,
+  no OR/shift on it anywhere. The `OpenAdapterFromDeviceName` handles (3 calls, all SUCCESS)
+  and the 0x328 QueryStatistics buffers feed a **different** consumer (the `0x1491c7b90`
+  object list + per-GPU stats), never field8.
+
+### 6.4 Why the tag is always 0 under wine
+
+The `(field8>>54)&0x3ff` check is a tagged-pointer discriminator. The records are copies
+of a static template whose pointers are in-image (top bits 0). On Windows the game must
+obtain differently-tagged records from a path that never executes under this runner —
+consistent with the §3 zero-writer evidence: the tag source is absent, so `table[1]` is
+never populated and the fill loop crashes.
+
+**Verdict:** static-data deserializer investigation CLOSED. Record construction is
+game-internal static templating; the fix must make the game reach a code path that tags
+records (or a runner-level adapter identity the game expects), not patch the fill loop or
+the deserializer. GDB reverse-engineering of the pre-crash init is paused.
