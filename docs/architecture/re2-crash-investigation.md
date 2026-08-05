@@ -317,3 +317,27 @@ never populated and the fill loop crashes.
 game-internal static templating; the fix must make the game reach a code path that tags
 records (or a runner-level adapter identity the game expects), not patch the fill loop or
 the deserializer. GDB reverse-engineering of the pre-crash init is paused.
+
+---
+
+## 7. Open questions and next steps (2026-08-05)
+
+What a fresh session should try next, in priority order:
+
+1. **The game's tagging code path on Windows.** The records are static-template
+   copies whose field8 tags are 0 under wine. On Windows the game must obtain
+   tagged records from a path that never executes here. Candidate: identify the
+   code that would normally overwrite field8 (or its source) with an adapter
+   identity — the `0x14200c9xx` enumeration region and the `0x1491c7b90` object
+   list are the only D3DKMT-fed consumers; verify whether a Windows KMD-shaped
+   base (bits 54-63 set) is expected via `base+offset` in the deserializer.
+2. **Re-test b17 through SteamFlow** (runner already installed, b16 in
+   `.b16bak`): confirm QueryStatistics Type/Luid echo-back via the +d3dkmt
+   TRACE, and re-check whether the crash site moved at all under the new
+   win32u.so (expected: still `0x141f543d6` — but confirm empirically).
+3. **Wine D3DKMT data-shape gap** — if the game does consume some D3DKMT
+   return to tag records on Windows, compare wine's `d3dkmt.c` struct layouts
+   (adapter LUID/handle) against what the record fields expect.
+4. **Do NOT revisit:** AGS, llvmpipe/GPU-count, QueryAdapterInfo, hAdapter
+   bit-54, `0x1491b0050` patching, fill-loop patching — all empirically
+   refuted or unpatchable (see §1–§6).
