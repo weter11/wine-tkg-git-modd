@@ -470,6 +470,116 @@ level (§8.1). No win32u userpatch can populate `table[1]`. The remaining levers
 are §7.1's game-side tagging path (a path that under this runner never
 executes) — outside win32u's reach.
 
+---
+
+## 9. DXGI/D3D12 init gate — §7.1 investigation (2026-08-05)
+
+**Status: COMPLETE.** The DXGI/D3D12 gate is fully mapped. RE2's renderer
+capability subsystem (`0x14283xxx-0x142Bxxxx`) — the only code that calls
+`CreateDXGIFactory1/2`, `D3D11CreateDevice`, and loads `d3d12.dll` /
+`12on7\d3d12.dll` — is **structurally after** the fill-loop crash site in init
+order. The game never reaches it because it dies at `0x141f543d6` first.
+
+### 9.1 What the game actually resolves pre-crash (runtime, not imports)
+
+`re2.exe` has **zero static `NtGdiDdDDI*` imports** and zero static d3d12
+import. Pre-crash adapter enumeration is 100% runtime-resolved via
+`GetProcAddress` (slot resolver `0x14200c732`, IAT `KERNEL32!GetProcAddress`):
+
+```
+0x1458d2408  D3DKMTCloseAdapter
+0x1458d2420  D3DKMTQueryStatistics
+0x1458d2438  SetupDiGetClassDevsW
+0x1458d2450  SetupDiDestroyDeviceInfoList
+0x1458d2470  SetupDiEnumDeviceInterfaces
+0x1458d2490  SetupDiGetDeviceInterfaceDetailW
+0x1458d24b8  SetupDiGetDeviceRegistryPropertyW
++ 0x1458d23e8  D3DKMTOpenAdapterFromDeviceName (resolved in 0x14200c711)
++ 0x1469598e0  D3DKMTQueryAdapterInfo, 0x1469598f8 D3DKMTEnumAdapters2
+```
+
+The enum region `0x14200c811-0x14200cccb` calls these slots:
+`SetupDiGetClassDevsW → SetupDiEnumDeviceInterfaces → SetupDiGetDeviceInterfaceDetailW
+→ OpenAdapterFromDeviceName → D3DKMTQueryStatistics (Type 0 then Type 3 per GPU)
+→ D3DKMTCloseAdapter`. It has **zero static callers** (function-pointer entry).
+The `0x1491c7b90` region is a type-tag dispatcher array (0x288 stride);
+`0x1491b0458/460/464` is the per-GPU object-list vector (written by
+`0x140018ab0`, a std::vector-style grow helper, called 2311×).
+
+### 9.2 The fill loop reads a STATIC records table (correction to §8.2)
+
+The instantiator's `mov r9, [0x1491b0300]` loads the pointer **stored at**
+`0x1491b0300` = template[0x60] after deserializer fixup = **`0x1473decd0`**
+(template+0x300, static `.data`). The fill loop reads 80-byte records from
+**`0x1473decd0 + i*80`** — a baked static table, not BSS. Dump (rec1..15)
+shows real baked records with `tag54 = (field8>>54)&0x3ff = 0` for **all** of
+them. 0 RIP-relative writes and 0 loads target this table — it is pure static
+data, never written at runtime. The `0x1491b0300` BSS copy is a *header
+pointer slot*, not the records themselves (watchpoints in §1–§6 watched the
+copy, not the real table — the conclusion is unchanged: tags are 0 by
+construction).
+
+### 9.3 The DXGI/D3D12 renderer init — where it lives, why it never runs
+
+- `CreateDXGIFactory1` IAT thunk `0x14541461c`: called from **6 sites**, all in
+  `0x14284b7f0 / 0x142ab5e80 / 0x142abed60 / 0x142b2cc60 / 0x142b373b4` —
+  the renderer capability/device-creation subsystem.
+- `CreateDXGIFactory2` (2 sites) and `D3D11CreateDevice` (3 sites) — same zone.
+- Renderer API capability strings (`DirectX11`, `DirectX12`, `DirectX12Legacy`,
+  **`12on7\d3d12.dll`**, `d3d12.dll`) at `0x1459a3388-3420`, referenced only
+  from `0x14283xxx-0x14284xxx`.
+- `d3d12.dll` is loaded **dynamically by wide-char name** (`L"d3d12.dll"` /
+  `L"12on7\d3d12.dll"` = D3D12On7 fallback) — no static/delay import
+  (delay-import dir has only `steam_api64.dll` + `openvr_api.dll`).
+- All these functions have no static callers upward of `0x14284b472` —
+  renderer entry is via component/plugin pointer table.
+
+### 9.4 SteamFlow launch evidence (b18 run 1785925017734, app 883710)
+
+- `effective_env.txt`: `WINEDLLOVERRIDES=...;d3d12=n,b;d3d12core=n,b;dxgi=n,b;
+  d3d8=n,b;d3d9=n,b;d3d10core=n,b;d3d11=n,b;...;nvapi64=n` — **native
+  VKD3D-Proton overrides ARE set**; runner ships `lib/wine/x86_64-windows/
+  d3d12core.dll` + `d3d12.dll`.
+- `user_apps.json` for 883710: `vkd3d_proton_enabled:false`,
+  `dxvk_enabled:false`, `force_wined3d:true` (a **dead config field** — defined
+  in `models.rs` but never consumed in launch logic), `gpu_preference:
+  "NVIDIA GPU (card2)"`, `VK_ICD_FILENAMES` = radeon+nvidia only.
+- **b18 wine log is 16 lines and contains ZERO d3d12/dxgi/vkd3d/d3d11/
+  wined3d/opengl lines** — the game never loads or calls any graphics DLL
+  before the crash.
+
+### 9.5 Exact condition preventing VKD3D-Proton DXGI setup pre-`0x141f543d6`
+
+**The DXGI/D3D12 init is simply not reachable before the fill loop.** The
+crash is in RE Engine's core object/type-registry init (TDB deserializer →
+record instantiator → fill loop → `table[1]` deref), which runs during static
+global construction / early engine boot (`0x140018xxx` writers are
+constructor registrations; allocator helper `0x1457af508` has 382 call sites
+in 240 functions). The renderer capability subsystem that would call
+`CreateDXGIFactory`/load `d3d12.dll` executes **later** in the boot sequence,
+as a plugin-style component. Nothing in SteamFlow's config suppresses it —
+`WINEDLLOVERRIDES` already forces `d3d12=n,b;dxgi=n,b` — the game just never
+reaches that code because the record tag is 0 by construction (§6.4) and
+`table[1]` stays NULL.
+
+**Test conclusion:** forcing native VKD3D `dxgi.dll`/`d3d12.dll` (already
+active in b18) cannot populate the adapter object RE Engine needs, because the
+fill loop that crashes is upstream of the entire DXGI/D3D12 subsystem. The
+only remaining levers are game-side (the Windows-only tagging path, §7.1) —
+outside runner/win32u control.
+
+### 9.6 Tooling added this session
+
+- `re2refs.py` — memory-safe region xref scanner (chunked, `detail=False`).
+- `re2callers.py` / `re2addrtaken.py` / `re2chain.py` / `re2chain2.py` —
+  caller/address-taken/init-chain walkers.
+- `re2delay.py` — delay-import dir parser (steam_api64 + openvr_api only).
+- `re2gate.py` / `re2gate_str.py` — slot-resolver + name-string decode.
+- `re2dllstr.py` / `re2d12ctx.py` / `re2wide.py` / `re2cap.py` — dll-name
+  string scans (wide-char aware).
+- `re2recs_real.py` / `re2recs_extent.py` — static records table dump.
+- `re2ptr.py` / `re2reg.py` — pointer-table + registration-helper census.
+
 ### 8.5 Reusable tooling added this session
 
 - `re2iat_dump.py` — correct IAT name resolution (bit-63 ordinal vs
