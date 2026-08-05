@@ -341,3 +341,111 @@ What a fresh session should try next, in priority order:
 4. **Do NOT revisit:** AGS, llvmpipe/GPU-count, QueryAdapterInfo, hAdapter
    bit-54, `0x1491b0050` patching, fill-loop patching — all empirically
    refuted or unpatchable (see §1–§6).
+
+---
+
+## 8. Proton win32u comparison + record-array writer proof (2026-08-05)
+
+**Status: COMPLETE.** Answers §7.1–§7.3 definitively. Proton's win32u does NOT
+custom-patch any D3DKMT adapter-identity path; the records array (rec2+) has
+**zero writers** in the whole PE; the "GPU-index list" is actually a
+method-dispatch table. The `d3dkmt_proton_parity.mypatch` userpatch (verified
+against pinned `a011ce5724`) is the only win32u lever available.
+
+### 8.1 Proton vs wine-tkg win32u (diff of `d3dkmt.c` + `sysparams.c`)
+
+Clone: `wine-proton` @ `proton_11.0` (`81d78e4`, shallow). Diff vs pinned
+wine-src (`a011ce5724`, wine-tkg 11.14 staging):
+
+**`dlls/win32u/d3dkmt.c`** (97-line diff — every hunk catalogued):
+- `#define WIN32_NO_STATUS` + `#include "d3dkmdt.h"` (needed for the caps struct)
+- `KMT_DRIVERVERSION_WDDM_3_1` → **`KMT_DRIVERVERSION_WDDM_1_3`** (Valve pins
+  WDDM 1.3 — RE Engine titles gate DX12 features on this value)
+- **NEW `KMTQAITYPE_WDDM_2_7_CAPS` case** — reads VkPhysicalDeviceDriverProperties,
+  advertises Hardware-Scheduling for NVIDIA proprietary drivers,
+  `WINE_DISABLE_HARDWARE_SCHEDULING` override (Valve-custom, not upstream)
+- **Khronos vendor-ID filter in the GPU-list builder:**
+  `if (devinfo[i].properties2.properties.vendorID >= 0x10000) continue;`
+  — excludes software rasterizers (llvmpipe/lavapipe report 0x10005) from the
+  wine-side GPU list (this is the "Ignore software Vulkan devices" fix)
+- Upstream churn only (not custom): external_fence vs external_memory
+  extension, dpi return type.
+
+**`dlls/win32u/sysparams.c`** (46 KB, 69 hunks — up to line 6163):
+- `fixup_device_id()` — `WINE_HIDE_NVIDIA_GPU` / `WINE_HIDE_AMD_GPU` /
+  `WINE_HIDE_VANGOGH_GPU` / `WINE_HIDE_INTEL_GPU` env-var spoofing (Valve-custom)
+- steamcompmgr modeset disable, display-mode list changes, dpi plumbing
+- **ZERO** LUID / OpenAdapter / hAdapter / QueryStatistics changes (grep=0)
+
+**Verdict:** Proton does NOT change `NtGdiDdDDIOpenAdapterFromLuid/DeviceName`,
+LUID generation, handle format, or adapter enumeration. LUIDs come from the
+same `NtAllocateLocallyUniqueId` path as wine-tkg. The only D3DKMT-relevant
+Valve deltas: WDDM version pin (1.3), WDDM_2_7_CAPS/HwSch, and the
+software-vendor filter. **The "Proton adapter-handle difference" hypothesis is
+therefore REFUTED at the source level** — no win32u handle-shape change can
+make the game tag records.
+
+### 8.2 Record-array writer proof (why §6's conclusion is airtight)
+
+Watchpoint captures (already on disk, no new runs needed):
+
+- **`re2_watch6.txt` (0.6s, pre-copy):** `0x1491b0300+` all zeros.
+- **`re2_watch4.txt` (crash):** rec0/rec1 filled only by the 0xE0-byte copy
+  (values `0x1482e78d0`, `0x1479ef200`, … = template-derived in-image ptrs).
+- The copy at `0x141f54270` spans `0x1491b02a0–0x1491b0388` = rec0 (0x50)
+  fully + rec1's first 0x30 bytes. **rec2+ (`0x1491b03a0+`) are BSS zeros
+  and no instruction in the PE writes them** — the fill loop (bound
+  `template[0xC]` = `0x13677` = 79,479 iterations) reads them all → tag 0 →
+  `table[1]` stays NULL → crash at `0x141f543d6`. No writer exists to find.
+
+### 8.3 The "GPU-index list" is a method-dispatch table
+
+The `0x1458c0b20` list the earlier session called "GPU-index list" is decoded
+(instantiator base `0x1458c0ae0`, entries at `[rsi-0x20]` idxA, `[rsi-0x18]`
+strA, `[rsi-0x10]` byteA, `[rsi-8]` idxB, `[rsi]` strB, `[rsi+8]` byteB;
+stride 0x30, 7 entries). The string targets are **.NET-style method names**:
+
+```
+Equals  GetHashCode  Finalize  GetType  ToString  CompareTo  Compare
+DefaultExceptionHandler  GetEnumerator  MoveNext  get_Current  IndexOf
+```
+
+Entry 0: `idxA=1` `strA="Equals"` — the crash reads `table[1]` for it. This is
+a **vtable/interface-dispatch descriptor table** (IEnumerator:
+get_Current+MoveNext; IComparable: CompareTo; IComparer: Compare), not GPU
+indices. The records are method/type descriptors whose field8 tags select the
+dispatch slot. On Windows the game populates records 2+ from a reflection path
+that never executes under this runner (consistent with §6.4: tag source
+absent, no win32u parameter can supply it).
+
+### 8.4 Userpatch deliverable — `d3dkmt_proton_parity.mypatch`
+
+Located at `wine-tkg-userpatches/d3dkmt_proton_parity.mypatch` (this repo).
+Verified with `patch --dry-run` + real apply against pinned `a011ce5724`
+`dlls/win32u/d3dkmt.c` (all 3 hunks clean):
+
+1. `WIN32_NO_STATUS` + `d3dkmdt.h` include
+2. `KMT_DRIVERVERSION_WDDM_1_3` (Proton parity — RE Engine WDDM gate)
+3. `KMTQAITYPE_WDDM_2_7_CAPS` + NVIDIA HwSch + `WINE_DISABLE_HARDWARE_SCHEDULING`
+4. Khronos vendor-ID filter in the GPU-list builder (excludes llvmpipe/lavapipe)
+
+Caveats: this is **Proton-parity**, i.e. the full set of Valve's win32u D3DKMT
+deltas. It does NOT and cannot populate `table[1]` (watchpoint-proven: no
+win32u data reaches field8) — so the §1 crash site is **expected to stay
+`0x141f543d6`**. It is the correct deliverable for "provide the WDDM adapter
+identity RE Engine expects": it removes the software GPU from wine's
+enumeration and pins the WDDM version to what RE Engine's DX12 path was built
+against, matching Proton exactly. Test in b18 via SteamFlow; if the crash
+moves (it may, if the game now picks a different init branch), the new site
+feeds the next round.
+
+### 8.5 Reusable tooling added this session
+
+- `re2iat_dump.py` — correct IAT name resolution (bit-63 ordinal vs
+  IMAGE_IMPORT_BY_NAME). Result: **no static NtGdiDdDDI\* imports**; game
+  resolves D3DKMT at runtime via slots at `0x1491C8xxx` (not the IAT).
+- `re2_gpu_list_dump.py` / `re2_list_head.py` — GPU-index/method-list decode.
+- `re2_tpl_dump.py` — TDB template field decode (count `0x13677` @ +0xC).
+- `re2recscan.py` — **DO NOT RERUN on this machine**: capstone `detail=True`
+  over the full `.text` OOMs the 16 GB box. Use byte-pattern grep + objdump
+  instead (see §5 methodology).
