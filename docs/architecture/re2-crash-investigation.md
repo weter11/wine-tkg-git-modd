@@ -590,3 +590,126 @@ outside runner/win32u control.
 - `re2recscan.py` — **DO NOT RERUN on this machine**: capstone `detail=True`
   over the full `.text` OOMs the 16 GB box. Use byte-pattern grep + objdump
   instead (see §5 methodology).
+
+---
+
+## 10. PE relocation / ntdll allocation / early-attach hooks (§10)
+
+**Status: COMPLETE — both hypotheses REFUTED.** field8's tag (bits 54-63)
+cannot originate from PE image-base relocation, ntdll memory allocation, or
+any early DLL_PROCESS_ATTACH hook. The tag is structurally impossible to set
+in user mode; the static records table carries tag=0 baked in the file.
+
+### 10.1 Address-space ceiling: bits 54-63 are unreachable in user mode
+
+re2.exe is a PE32+ (0x20b), `DLL characteristics = 0x8160` →
+`LARGE_ADDRESS_AWARE (0x20)` + `DYNAMIC_BASE / ASLR (0x40)` set,
+**`HIGH_ENTROPY_VA` NOT set** (no 0x200000 bit).
+
+Windows x64 user-mode addresses are **47-bit** (`0x00007FFF'FFFFFFFF` max),
+even with High-Entropy VA. `(addr >> 54) & 0x3ff` is **always 0** for any
+user-mode pointer:
+
+```
+typical ASLR base   0x00007ff600000000  tag54=0
+high-entropy max    0x00007fffffffffff  tag54=0
+kernel boundary     0xffff800000000000  tag54=0x3ff  (kernel only)
+required tag!=0     ≥ 0x0040000000000000 (2^54) — impossible in user space
+```
+
+For the tag to be non-zero the game would need a **kernel-mode address** or a
+deliberate `ptr | (tag << 54)` construction — neither happens.
+
+### 10.2 ntdll virtual/loader diff: Proton vs wine-tkg (pinned a011ce5724)
+
+Extracted `dlls/ntdll/unix/virtual.c` + `unix/loader.c` from both
+(`wine-proton` @ proton_11.0 via git show; pinned wine-tkg via the build's
+`build/wine-git` mirror at `a011ce5724`):
+
+**Identical (no functional difference):**
+- `user_space_limit = address_space_limit = (void*)0x7fffffff0000` — 47-bit
+  user space in BOTH.
+- PE images mapped at `nt->OptionalHeader.ImageBase` (`0x140000000` for
+  re2.exe); `delta = module - image_base` fixups only — **no ASLR
+  randomization of the image base in either ntdll**.
+- `virtual_set_large_address_space()`: identical gate
+  (`HIGH_ENTROPY_VA && DYNAMIC_BASE` → free low memory); re2.exe has no
+  HIGH_ENTROPY_VA, so even this branch is inert.
+- `reserve_area(0x10000, 0x68000000)` + `reserve_area(0x7ffffe000000,
+  0x7fffffff0000)` — same reserved ranges.
+
+**Proton-only additions (not present in wine-tkg):**
+- `WINE_LARGE_ADDRESS_AWARE` env override (default on) — only affects
+  WOW64 32-bit limit, irrelevant to 64-bit re2.exe.
+- `release_reserved_memory_low_bound` HACK (macOS/SteamDeck) — frees
+  **low** memory (0x20000000–0x7f000000), never high.
+- **`steamclient_setup_trampolines` / `steamclient_handle_fault` /
+  `steamclient_write_jump_x64/x86`** (loader.c, 28 steamclient hits) —
+  Valve-custom: patches **steamclient's own .text** exports to trampoline to
+  a target module (Steam interop), triggered via `WINESTEAMNOEXEC`. Touches
+  only steamclient, never the game image or the TDB template.
+
+**Runtime confirmation (b18, watch captures):** re2.exe loaded at exactly
+`0x140000000` (r11 = image base during the copy; MZ header `0x0000000300905a4d`
+at that address). The invalid .reloc table (0x54 bytes of non-block garbage;
+reloc dir claims block size 0x64a57a1e in an 84-byte dir) means wine cannot
+relocate it anyway — it maps at the preferred base. `WINEPRELOADRESERVE` is
+used by both trees identically.
+
+### 10.3 The static records table: tags are baked 0, not runtime-patched
+
+The fill loop reads `field8` from the static table at `0x1473decd0`
+(template+0x300). Dump (file off 0x73ddcd0):
+
+```
+rec0: f0=0x0000000000000000 f8=0x0000000000000000  tag54=0
+rec1: f0=0x201147f3a19c0001 f8=0x00018fa000000000  tag54=0   (bits 40-51 = 0x18fa table idx)
+rec2: f0=0x2000000000000002 f8=0x0000023000000000  tag54=0
+rec6: f0=0x2000000000000006 f8=0x0000093000000000  tag54=0
+```
+
+field8 values are **index/size fields, not pointers** (low 32 bits are 0,
+not an image RVA). Bits 54-63 are 0 **in the file** — nothing at load time
+(no relocation, no attach hook) changes them. `f0`'s bit 61 is a separate
+record-type flag, not the field8 tag.
+
+### 10.4 lsteamclient / Steam API early-attach hooks
+
+- b18 launch env: `lsteamclient=` (empty → wine builtin), `steamclient=n`,
+  `steamclient64=n`.
+- The b18 runner's ntdll is **wine-tkg 11.14 staging** (`wine-tkg-staging-
+  git-11.14.r4.gd58a6e9c`) — `strings` shows **no steamclient trampoline**
+  (Proton-only). Even under Proton, the trampoline redirects steamclient
+  exports (Steam API forwarding) — it has no code path that writes to
+  `0x1473decd0` or any game static data.
+- `DLL_PROCESS_ATTACH` of lsteamclient/steamclient cannot tag the TDB
+  template: no such writer exists in either tree, and the watchpoint on the
+  template's field8 source (`0x1473dea38`) never fired (§1-§6).
+
+### 10.5 Report: origin of field8's tag
+
+**Neither ntdll PE relocation nor early attach hooks produce the tag.**
+- PE image base: impossible — user mode caps at 2^47; re2.exe loads at
+  `0x140000000` under the runner (identical to Proton's behavior; both ntldd
+  map at ImageBase).
+- ntdll allocation: identical address-space layout in Proton vs wine-tkg;
+  Proton's only custom ntdll code (steamclient trampoline, low-memory
+  release, WINE_LARGE_ADDRESS_AWARE) cannot set bits 54-63.
+- Early attach: lsteamclient/steamclient hooks exist only in Proton and only
+  patch steamclient itself; nothing writes the static records table.
+- The records table's field8 tag bits are **0 baked in the PE file** — they
+  are compile-time index/size fields. The game's Windows-only tagging path
+  (§7.1) must construct the tag in-game (`ptr | (tag << 54)`), which is a
+  game-side code path that never executes under this runner.
+
+**Conclusion:** the tag does NOT originate from the loader, the allocator, or
+Steam API hooks under either Proton or wine-tkg. Closing §7.1's remaining
+sub-question: the Windows tagging path is purely game-internal.
+
+### 10.6 Tooling added this session
+
+- `re2reloc.py` / `re2addrspace.py` — PE reloc table + address-space analysis.
+- `/tmp/proton_ntdll_unix_virtual.c` / `_loader.c`,
+  `/tmp/tkg_ntdll_unix_virtual.c` / `_loader.c` — extracted ntdll sources for
+  diff (Proton 11.0 vs pinned a011ce5724).
+- `re2f8chk.py` — field8 index/size-field decode.
