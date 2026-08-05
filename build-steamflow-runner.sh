@@ -328,13 +328,25 @@ EOF
     cat > "${WINE_TKG_DIR}/wine-tkg-userpatches/d3dkmt_query_stats.mypatch" << 'PATCH_EOF'
 --- a/dlls/win32u/d3dkmt.c
 +++ b/dlls/win32u/d3dkmt.c
-@@ -724,5 +724,26 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+@@ -723,6 +723,41 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+  */
  NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
  {
 -    FIXME( "(%p): stub\n", stats );
-+    TRACE( "(%p): returning dummy adapter statistics\n", stats );
++    D3DKMT_QUERYSTATISTICS_TYPE type;
++    LUID luid;
 +
 +    if (!stats) return STATUS_INVALID_PARAMETER;
++
++    /* Save the query header BEFORE zeroing: the game sends Type + AdapterLuid
++     * in the input struct and a conforming implementation must echo them back
++     * unchanged (re2.exe queries ADAPTER then ADAPTER_SEGMENT per GPU and
++     * re-reads the header after the call). */
++    type = stats->Type;
++    luid = stats->AdapterLuid;
++
++    TRACE( "(%p): type %u, adapter luid %08x:%08x\n", stats, type,
++           luid.HighPart, luid.LowPart );
 +
 +    /* Zero the whole buffer first so games that read the result never see
 +     * garbage, then populate plausible dummy values. The RE Engine
@@ -342,6 +354,56 @@ EOF
 +     * init and dereferences the result; the empty stub made it read a null
 +     * structure and crash (re2.exe+0x1f543d6, movq 8(%rcx) with rcx=0). */
 +    memset( stats, 0, sizeof(*stats) );
++
++    /* Echo the query header back to the caller. */
++    stats->Type = type;
++    stats->AdapterLuid = luid;
++
++    /* D3DKMT_QUERYSTATISTICS_PROCESS_ADAPTER / _PROCESS_SEGMENT queries:
++     * the game reads NbSegments/NodeCount/VidPnSourceCount and iterates
++     * over them — a zero count makes it dereference a null segment table. */
++    stats->QueryResult.ProcessAdapterInformation.NbSegments = 1;
++    stats->QueryResult.ProcessAdapterInformation.NodeCount = 1;
++    stats->QueryResult.ProcessAdapterInformation.VidPnSourceCount = 1;
++    stats->QueryResult.ProcessAdapterInformation.CommitmentData.BytesBySegmentPreference[0] = 0x40000000;
++    stats->QueryResult.ProcessAdapterInformation.CommitmentData.BytesBySegmentPreference[1] = 0x10000000;
++    stats->QueryResult.ProcessAdapterInformation._Policy.PreferAperture[0] = 1;
++    stats->QueryResult.ProcessAdapterInformation._Policy.PreferApertureForRead[0] = 1;
+     return STATUS_SUCCESS;
+ }
+PATCH_EOF'
+--- a/dlls/win32u/d3dkmt.c
++++ b/dlls/win32u/d3dkmt.c
+@@ -723,6 +723,41 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+ */
+ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
+ {
+-    FIXME( "(%p): stub\n", stats );
++    D3DKMT_QUERYSTATISTICS_TYPE type;
++    LUID luid;
++
++    if (!stats) return STATUS_INVALID_PARAMETER;
++
++    /* Save the query header BEFORE zeroing: the game sends Type + AdapterLuid
++     * in the input struct and a conforming implementation must echo them back
++     * unchanged (re2.exe queries ADAPTER then ADAPTER_SEGMENT per GPU and
++     * re-reads the header after the call). */
++    type = stats->Type;
++    luid = stats->AdapterLuid;
++
++    TRACE( "(%p): type %u, adapter luid %08x:%08x\n", stats, type,
++           luid.HighPart, luid.LowPart );
++
++    /* Zero the whole buffer first so games that read the result never see
++     * garbage, then populate plausible dummy values. The RE Engine
++     * (Resident Evil 2/3/7, etc.) queries adapter statistics during renderer
++     * init and dereferences the result; the empty stub made it read a null
++     * structure and crash (re2.exe+0x1f543d6, movq 8(%rcx) with rcx=0). */
++    memset( stats, 0, sizeof(*stats) );
++
++    /* Echo the query header back to the caller. */
++    stats->Type = type;
++    stats->AdapterLuid = luid;
 +
 +    /* D3DKMT_QUERYSTATISTICS_PROCESS_ADAPTER / _PROCESS_SEGMENT queries:
 +     * the game reads NbSegments/NodeCount/VidPnSourceCount and iterates
