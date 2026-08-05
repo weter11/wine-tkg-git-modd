@@ -1,7 +1,6 @@
 --- a/dlls/win32u/d3dkmt.c
 +++ b/dlls/win32u/d3dkmt.c
-@@ -723,6 +723,41 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
-  */
+@@ -724,6 +724,41 @@ NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
  NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
  {
 -    FIXME( "(%p): stub\n", stats );
@@ -43,3 +42,4 @@
 +    stats->QueryResult.ProcessAdapterInformation._Policy.PreferApertureForRead[0] = 1;
      return STATUS_SUCCESS;
  }
+ 
