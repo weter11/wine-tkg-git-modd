@@ -1282,6 +1282,14 @@ else
       sed -i -e "s|CURRENT_PREFIX_VERSION=\"TKG\"|CURRENT_PREFIX_VERSION=\"$_prefix_version-999\"|" "proton_tkg_$_protontkg_version/proton"
     fi
 
+    if [ "$_steamclient_noswap" = "true" ]; then
+      sed -i 's/"steam.exe": "b",/"steam.exe": "d",/g' "proton_tkg_$_protontkg_version/proton"
+      sed -i 's/filestocopy = \[/filestocopy = \[\] and \[/g' "proton_tkg_$_protontkg_version/proton"
+      sed -i 's/.*PROTON_DISABLE_LSTEAMCLIENT.*/     "PROTON_DISABLE_LSTEAMCLIENT": "1",/g' "proton_tkg_$_protontkg_version/user_settings.py"
+    else
+      sed -i 's/.*PROTON_DISABLE_LSTEAMCLIENT.*/#     "PROTON_DISABLE_LSTEAMCLIENT": "1",/g' "proton_tkg_$_protontkg_version/user_settings.py"
+    fi
+
     if [ "$_no_container" = "true" ]; then
       #### Disable VR support patch as our wine-side support reportedly doesn't work
       # Patch our proton script to allow for VR support

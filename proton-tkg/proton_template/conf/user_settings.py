@@ -30,6 +30,9 @@ user_settings = {
     #Alternative way to run executables directly with wine binary instead of using steam.exe. This is the preffered way when using proton standalone.
 #    "PROTON_STANDALONE_START": "1",
 
+    #Set to true to disable proton's steamclient lib substitution. Allows running windows steam client in proton (only affects 4.19+)
+#    "PROTON_DISABLE_LSTEAMCLIENT": "1",
+
     #Enable nvapi support through nvidia provided nvngx.dll (Requires nvidia driver 470+) - Needed for DLSS support
 #    "PROTON_ENABLE_NVAPI": "1",
 
