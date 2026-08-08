@@ -1,0 +1,78 @@
+--- a/dlls/win32u/window.c
++++ b/dlls/win32u/window.c
+@@ -582,6 +582,30 @@ DWORD get_window_thread( HWND hwnd, DWORD *process )
+ 
+     if (!get_user_entry( hwnd, NTUSER_OBJ_WINDOW, &entry, &handle ))
+     {
++        /* The shared-memory user entry lookup may miss for windows owned by
++         * another process (e.g. a 32-bit game window resolved from the 64-bit
++         * bridge server). Fall back to the wineserver, which tracks the full
++         * window list, to resolve the owning process and thread. */
++        DWORD tid = 0, pid = 0;
++
++        SERVER_START_REQ( get_window_info )
++        {
++            req->handle = wine_server_user_handle( hwnd );
++            if (!wine_server_call_err( req ))
++            {
++                tid = (DWORD)reply->tid;
++                pid = (DWORD)reply->pid;
++            }
++        }
++        SERVER_END_REQ;
++
++        if (tid)
++        {
++            /* cross-process window resolved via the server */
++            if (process) *process = pid;
++            return tid;
++        }
++
+         RtlSetLastWin32Error( ERROR_INVALID_WINDOW_HANDLE );
+         return 0;
+     }
+@@ -1492,6 +1516,16 @@ static LONG_PTR set_window_long_internal( HWND hwnd, INT offset, UINT size,
+     }
+     if (win == WND_OTHER_PROCESS)
+     {
++        if (offset == GWLP_WNDPROC)
++        {
++            /* Subclassing a window owned by another process is not supported:
++             * fail fast instead of blocking on a cross-process WM_WINE_SETWINDOWLONG
++             * round-trip (the owner thread may be busy, e.g. waiting on a bridge
++             * CreateDevice response, which would deadlock). Callers fall back to
++             * a window-message channel in this case. Matches wine 10 behavior. */
++            RtlSetLastWin32Error( ERROR_ACCESS_DENIED );
++            return 0;
++        }
+         if (offset > 32767 || offset < -32767)
+         {
+             RtlSetLastWin32Error( ERROR_INVALID_INDEX );
+--- a/server/protocol.def
++++ b/server/protocol.def
+@@ -2694,6 +2694,8 @@ enum message_type
+     data_size_t    size;        /* size of the info value to read */
+ @REPLY
+     user_handle_t  last_active; /* last active popup */
++    process_id_t   pid;         /* process owning the window */
++    thread_id_t    tid;         /* thread owning the window */
+     lparam_t       info;        /* current window info value */
+ @END
+ 
+--- a/server/window.c
++++ b/server/window.c
+@@ -2407,6 +2407,14 @@ DECL_HANDLER(get_window_info)
+     reply->last_active = win->handle;
+     if (get_user_object( win->last_active, NTUSER_OBJ_WINDOW )) reply->last_active = win->last_active;
+ 
++    /* Expose the owning process/thread so win32u can resolve cross-process
++     * window handles even when the shared-memory user entry lookup misses. */
++    if (win->thread)
++    {
++        reply->pid = get_process_id( win->thread->process );
++        reply->tid = get_thread_id( win->thread );
++    }
++
+     switch (req->offset)
+     {
+     case GWL_STYLE:       reply->info = win->style;  break;
