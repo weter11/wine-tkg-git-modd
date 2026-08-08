@@ -42,3 +42,7 @@ proton-tkg/proton_dist_tmp/
 proton-tkg/proton_tkg_token
 proton-tkg/external-resources
 proton-tkg/gst/
+
+# build artifacts (steamflow runner builds)
+/build/
+/dist/

@@ -99,7 +99,7 @@ except Exception as e:
 fetch_wine_source() {
     step "Fetching Wine source"
     mkdir -p "${BUILD_DIR}"
-    if [[ -d "${WINE_SRC_DIR}/.git" ]]; then
+    if [[ -d "${WINE_SRC_DIR}/.git" ]] || git -C "${WINE_SRC_DIR}" rev-parse --is-bare-repository 2>/dev/null | grep -q '^true$'; then
         log "Updating existing Wine repository..."
         git -C "${WINE_SRC_DIR}" fetch --all --tags --prune
     else
