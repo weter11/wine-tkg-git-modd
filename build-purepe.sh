@@ -9,8 +9,10 @@
 # Recipe provenance: SteamFlow docs/architecture/phase3-pure-pe-proton11.md
 # (local podman build, 2026-08-11/12) + staged compatibilitytools.d trees.
 #
-# Run INSIDE the steamrt4 SDK container (see .github/workflows/purepe-runner.yml):
-#   registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0
+# Run on a HOST with a working container engine (docker or podman):
+# proton's own make machinery (`make redist`) spawns the steamrt4 SDK container
+# (see Makefile.in DOCKER_BASE) — see .github/workflows/purepe-runner.yml.
+#   STEAMRT_IMAGE: registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0
 #
 # Env overrides:
 #   PROTON_REF     Proton tag (default: proton-11.0-1b)
@@ -28,7 +30,7 @@ BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
 SRC_DIR="${BUILD_DIR}/proton-src"
 DIST_DIR="${BUILD_DIR}/dist"
-REDIST_DIR="${BUILD_DIR}/redist"
+REDIST_DIR="${SRC_DIR}/redist"   # `make redist` writes ./redist relative to the build cwd ($SRC_DIR)
 PATCH_FILE="${ROOT_DIR}/proton-purepe-makefile.in.patch"
 
 log() { echo -e "\033[1;34m[purepe]\033[0m $*" >&2; }
@@ -67,9 +69,10 @@ ELF32=$(find "${REDIST_DIR}" -type f -exec file {} + 2>/dev/null | grep -c 'ELF 
 [ "${ELF32}" = "0" ] || fail "GATE: ${ELF32} ELF 32-bit files in redist (pure-PE violated)"
 [ -f "${REDIST_DIR}/proton" ] || fail "GATE: root proton script missing (classify_runner -> Proton kind)"
 
-# Free disk before staging: object trees are the bulk of the build footprint
-log "== Cleaning obj-* trees =="
-rm -rf obj-* 
+# Free disk before staging: the build/ tree (wine/kaldi/dxvk obj dirs) and the
+# internal dist/ staging mirror are the bulk of the footprint. redist/ is complete.
+log "== Cleaning build/ + dist/ trees (redist is self-contained) =="
+rm -rf build dist
 df -h "${BUILD_DIR}" | tail -1
 
 log "== Staging variant A: rtx_remix_debug (stock dxvk submodule ${DXVK_SUB}) =="

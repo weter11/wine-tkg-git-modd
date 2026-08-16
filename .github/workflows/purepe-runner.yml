@@ -19,33 +19,29 @@ jobs:
     name: Build PurePE Runners (release + rtx_remix_debug)
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    env:
-      STEAMRT_SDK_IMAGE: registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Build inside steamrt4 SDK container
+      - name: Install host build deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends file rsync
+          docker --version
+
+      # Proton's `make redist` drives the steamrt4 SDK container itself
+      # (configure.sh discovers docker; ROOTLESS_CONTAINER=0 makes the
+      # Makefile pass -u $(id -u):$(id -g), so all outputs are owned by the
+      # runner user — no chown needed).
+      - name: Build (proton make machinery spawns the SDK container)
         env:
           PROTON_REF: ${{ github.event.inputs.proton_ref }}
           DXVK_RELEASE: ${{ github.event.inputs.dxvk_release }}
         run: |
           set -euo pipefail
-          docker pull "$STEAMRT_SDK_IMAGE"
-          # Build as root in the container (steamrt4 SDK image is Debian-based);
-          # output files are chowned back to the runner user afterwards.
-          docker run --rm -v "$PWD":/build -w /build \
-            -e PROTON_REF -e DXVK_RELEASE \
-            "$STEAMRT_SDK_IMAGE" \
-            bash -c '
-              set -euo pipefail
-              apt-get update -y
-              apt-get install -y --no-install-recommends git wget curl file rsync patch ca-certificates
-              chmod +x ./build-purepe.sh
-              ./build-purepe.sh
-            '
-          sudo chown -R "$(id -u):$(id -g)" "$PWD"
+          chmod +x ./build-purepe.sh
+          ./build-purepe.sh
 
       - name: Upload clean release tarball
         uses: actions/upload-artifact@v7
