@@ -1,0 +1,78 @@
+name: SteamFlow PurePE Runner Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      proton_ref:
+        description: "Proton tag to build (default proton-11.0-1b, the phase-3 recipe pin)"
+        required: false
+        type: string
+        default: "proton-11.0-1b"
+      dxvk_release:
+        description: "DXVK release version for the clean variant (default 3.0.2)"
+        required: false
+        type: string
+        default: "3.0.2"
+
+jobs:
+  build:
+    name: Build PurePE Runners (release + rtx_remix_debug)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      STEAMRT_SDK_IMAGE: registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build inside steamrt4 SDK container
+        env:
+          PROTON_REF: ${{ github.event.inputs.proton_ref }}
+          DXVK_RELEASE: ${{ github.event.inputs.dxvk_release }}
+        run: |
+          set -euo pipefail
+          docker pull "$STEAMRT_SDK_IMAGE"
+          # Build as root in the container (steamrt4 SDK image is Debian-based);
+          # output files are chowned back to the runner user afterwards.
+          docker run --rm -v "$PWD":/build -w /build \
+            -e PROTON_REF -e DXVK_RELEASE \
+            "$STEAMRT_SDK_IMAGE" \
+            bash -c '
+              set -euo pipefail
+              apt-get update -y
+              apt-get install -y --no-install-recommends git wget curl file rsync patch ca-certificates
+              chmod +x ./build-purepe.sh
+              ./build-purepe.sh
+            '
+          sudo chown -R "$(id -u):$(id -g)" "$PWD"
+
+      - name: Upload clean release tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: steamflow-proton-11.0-purepe
+          path: build-purepe/dist/steamflow-proton-11.0-purepe.tar.gz
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload rtx_remix_debug tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: steamflow-proton-11.0-purepe-rtx_remix_debug
+          path: build-purepe/dist/steamflow-proton-11.0-purepe-rtx_remix_debug.tar.gz
+          retention-days: 30
+          if-no-files-found: error
+
+      # Tag push -> attach purepe files to the same tag release as
+      # steamflow-runner.yml (softprops updates an existing release).
+      - name: Create/update release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/') && success()
+        uses: softprops/action-gh-release@v2
+        with:
+          update_release: true
+          files: |
+            build-purepe/dist/steamflow-proton-11.0-purepe.tar.gz
+            build-purepe/dist/steamflow-proton-11.0-purepe-rtx_remix_debug.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

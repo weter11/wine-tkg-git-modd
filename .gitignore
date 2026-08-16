@@ -46,3 +46,4 @@ proton-tkg/gst/
 # build artifacts (steamflow runner builds)
 /build/
 /dist/
+/build-purepe/
