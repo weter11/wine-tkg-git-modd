@@ -39,6 +39,7 @@ fail() { echo -e "\033[1;31m[purepe] ERROR: $*\033[0m" >&2; exit 1; }
 [ -f "${PATCH_FILE}" ] || fail "patch file not found: ${PATCH_FILE}"
 
 mkdir -p "${BUILD_DIR}"
+rm -rf "${DIST_DIR}"   # fresh output each run (self-hosted runner persists between runs)
 
 FREE_GB=$(df -BG "${BUILD_DIR}" | awk 'NR==2 {gsub(/G/,"",$4); print $4}')
 [ "${FREE_GB}" -ge 25 ] || fail "insufficient disk: ${FREE_GB}G free (need >= 25G; the full proton redist peaks at ~17-19G)"
