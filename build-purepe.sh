@@ -58,6 +58,9 @@ patch -p1 < "${PATCH_FILE}"
 grep -q 'Pure-PE WoW64' Makefile.in || fail "patch did not apply (marker not found)"
 grep -q 'WINEOPENXR_x86_64_PE_ARCHS = x86_64' Makefile.in || fail "patch did not apply (wineopenxr marker missing)"
 
+# Match the established VERSIONS.txt display form (short hash, e.g. "0a70623 (dxvk)")
+DXVK_SUB_SHORT="${DXVK_SUB:0:7}"
+
 log "== make redist (this is the long step) =="
 make -j"$(nproc)" redist 2>&1 | tee "${BUILD_DIR}/redist.log"
 [ -d "${REDIST_DIR}" ] || fail "make redist produced no ${REDIST_DIR}"
@@ -82,7 +85,7 @@ cp -a "${REDIST_DIR}" "${DIST_DIR}/steamflow-proton-11.0-purepe-rtx_remix_debug"
 rm -rf "${DIST_DIR}/steamflow-proton-11.0-purepe-rtx_remix_debug/__pycache__"
 cat > "${DIST_DIR}/steamflow-proton-11.0-purepe-rtx_remix_debug/VERSIONS.txt" <<EOF
 WINE_COMMIT=${PROTON_REF}
-DXVK_VERSION=${DXVK_SUB} (dxvk)
+DXVK_VERSION=${DXVK_SUB_SHORT} (dxvk)
 VKD3D_PROTON_VERSION=ef20c02 (vkd3d-proton)
 DXVK_NVAPI_VERSION=c68c350 (dxvk-nvapi)
 VKD3D_VERSION=30b93dc (vkd3d)
