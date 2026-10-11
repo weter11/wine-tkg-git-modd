@@ -62,6 +62,12 @@ patch -p1 < "${PATCH_FILE}"
 grep -q 'Pure-PE WoW64' Makefile.in || fail "patch did not apply (marker not found)"
 grep -q 'WINEOPENXR_x86_64_PE_ARCHS = x86_64' Makefile.in || fail "patch did not apply (wineopenxr marker missing)"
 
+log "== Applying pure-PE Wayland opt-in patch (proton script) =="
+WAYLAND_PATCH_FILE="${ROOT_DIR}/proton-purepe-wayland.patch"
+[ -f "${WAYLAND_PATCH_FILE}" ] || fail "wayland patch file not found: ${WAYLAND_PATCH_FILE}"
+patch -p1 < "${WAYLAND_PATCH_FILE}"
+grep -q 'PROTON_ENABLE_WAYLAND' proton || fail "wayland patch did not apply (marker not found)"
+
 # Match the established VERSIONS.txt display form (short hash, e.g. "0a70623 (dxvk)")
 DXVK_SUB_SHORT="${DXVK_SUB:0:7}"
 
@@ -75,6 +81,12 @@ log "== Pure-PE gates =="
 ELF32=$(find "${REDIST_DIR}" -type f -exec file {} + 2>/dev/null | grep -c 'ELF 32-bit' || true)
 [ "${ELF32}" = "0" ] || fail "GATE: ${ELF32} ELF 32-bit files in redist (pure-PE violated)"
 [ -f "${REDIST_DIR}/proton" ] || fail "GATE: root proton script missing (classify_runner -> Proton kind)"
+
+# Wayland opt-in gate: modules must be present in the redist (injected or built);
+# no 32-bit ELF Unix .so must appear.
+WAYLAND_ELF32=$(find "${REDIST_DIR}/files/lib/wine" -type f -path '*wayland*' -exec file {} + 2>/dev/null | grep -c 'ELF 32-bit' || true)
+[ "${WAYLAND_ELF32}" = "0" ] || fail "GATE: ${WAYLAND_ELF32} ELF 32-bit Wayland files in redist (pure-PE violated)"
+[ -f "${REDIST_DIR}/files/lib/wine/x86_64-unix/winewayland.so" ] || [ -f "${REDIST_DIR}/files/lib/wine/i386-unix/winewayland.so" ] || log "WARN: winewayland.so not present (opt-in Wayland unavailable until build/staging includes it)"
 
 # Free disk before staging: the build/ tree (wine/kaldi/dxvk obj dirs) and the
 # internal dist/ staging mirror are the bulk of the footprint. redist/ is complete.
@@ -131,9 +143,51 @@ RUNNER_VERSION=${PROTON_REF}-purepe (clean release build)
 BUILD_DATE=${BUILD_DATE}
 EOF
 
+# Native Wine Wayland driver: Valve Proton `make redist` may or may not build
+# winewayland.so/winewayland.drv depending on whether the steamrt4 SDK container
+# has wayland-client and wayland-egl available. If they are missing, inject from
+# the locally installed GE-Proton11-3 (same wine submodule 81d78e4).
+log "== Verifying native Wayland modules from Valve Proton build =="
+for variant in steamflow-proton-11.0-purepe steamflow-proton-11.0-purepe-rtx_remix_debug; do
+    vdir="${DIST_DIR}/${variant}/files/lib/wine"
+    if [ ! -f "${vdir}/x86_64-unix/winewayland.so" ] || [ ! -f "${vdir}/x86_64-windows/winewayland.drv" ]; then
+        log "WARN: ${variant} missing native Wayland modules — attempting GE-Proton11-3 fallback injection"
+        GE_WAYLAND_DIR="/home/wer/.local/share/Steam/compatibilitytools.d/GE-Proton11-3/files/lib/wine"
+        if [ -d "${GE_WAYLAND_DIR}" ]; then
+            mkdir -p "${vdir}/x86_64-unix" "${vdir}/x86_64-windows" "${vdir}/i386-windows"
+            if [ -f "${GE_WAYLAND_DIR}/x86_64-unix/winewayland.so" ]; then
+                cp -f "${GE_WAYLAND_DIR}/x86_64-unix/winewayland.so" "${vdir}/x86_64-unix/"
+                log "  injected x86_64-unix/winewayland.so from GE-Proton11-3"
+            fi
+            if [ -f "${GE_WAYLAND_DIR}/x86_64-windows/winewayland.drv" ]; then
+                cp -f "${GE_WAYLAND_DIR}/x86_64-windows/winewayland.drv" "${vdir}/x86_64-windows/"
+                log "  injected x86_64-windows/winewayland.drv from GE-Proton11-3"
+            fi
+            if [ -f "${GE_WAYLAND_DIR}/i386-windows/winewayland.drv" ]; then
+                cp -f "${GE_WAYLAND_DIR}/i386-windows/winewayland.drv" "${vdir}/i386-windows/"
+                log "  injected i386-windows/winewayland.drv from GE-Proton11-3"
+            fi
+        else
+            log "  GE-Proton11-3 not found — Wayland driver will be unavailable in this variant"
+        fi
+    else
+        log "  ${variant} has native Wayland modules from Valve Proton build"
+    fi
+done
+
 log "== Verifying variant diff (must be ONLY files/lib/wine/dxvk + VERSIONS.txt) =="
 diff -rq "${DIST_DIR}/steamflow-proton-11.0-purepe" "${DIST_DIR}/steamflow-proton-11.0-purepe-rtx_remix_debug" \
     | grep -v '^Only in' || true
+
+log "== Post-staging Wayland verification =="
+for variant in steamflow-proton-11.0-purepe steamflow-proton-11.0-purepe-rtx_remix_debug; do
+    vdir="${DIST_DIR}/${variant}/files/lib/wine"
+    [ -f "${vdir}/x86_64-unix/winewayland.so" ] || log "WARN: ${variant} missing x86_64-unix winewayland.so"
+    [ -f "${vdir}/x86_64-windows/winewayland.drv" ] || log "WARN: ${variant} missing x86_64-windows winewayland.drv"
+    # Confirm zero 32-bit ELF Wayland .so files in either variant
+    WDL32=$(find "${vdir}" -type f -path '*wayland*' -exec file {} + 2>/dev/null | grep -c 'ELF 32-bit' || true)
+    [ "${WDL32}" = "0" ] || fail "GATE: ${variant} has ${WDL32} ELF 32-bit Wayland files (pure-PE violated)"
+done
 
 log "== Packaging tarballs =="
 tar -C "${DIST_DIR}" --exclude='*/__pycache__' -czf "${DIST_DIR}/steamflow-proton-11.0-purepe.tar.gz" \
