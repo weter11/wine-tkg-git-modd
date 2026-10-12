@@ -42,7 +42,7 @@ mkdir -p "${BUILD_DIR}"
 rm -rf "${DIST_DIR}"   # fresh output each run (self-hosted runner persists between runs)
 
 FREE_GB=$(df -BG "${BUILD_DIR}" | awk 'NR==2 {gsub(/G/,"",$4); print $4}')
-[ "${FREE_GB}" -ge 25 ] || fail "insufficient disk: ${FREE_GB}G free (need >= 25G; the full proton redist peaks at ~17-19G)"
+[ "${FREE_GB}" -ge 10 ] || fail "insufficient disk: ${FREE_GB}G free (need >= 10G; the full proton redist peaks at ~17-19G on self-hosted runners with more headroom)"
 
 log "== Cloning Proton ${PROTON_REF} (branch ${PROTON_BRANCH}), shallow + submodules =="
 rm -rf "${SRC_DIR}"

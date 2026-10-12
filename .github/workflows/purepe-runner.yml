@@ -17,12 +17,10 @@ on:
 jobs:
   build:
     name: Build PurePE Runners (release + rtx_remix_debug)
-    # Self-hosted: the full Proton redist peaks at ~20G of disk. GitHub-hosted
-    # runners expose only ~8-9G usable (14G total minus the runner image), so
-    # this job cannot run there. Larger runners (ubuntu-latest-4-core) are
-    # org/enterprise-only. Setup: ./setup-selfhosted-runner.sh on a machine
-    # with headroom + docker/podman (ccache persists there -> fast rebuilds).
-    runs-on: [self-hosted, linux, x64, steamflow-purepe]
+    # GitHub-hosted runner: 16GB RAM, 14GB SSD. The full Proton redist peaks
+    # at ~17-19GB of disk, so the build/ tree is cleaned before staging to
+    # stay within the runner's disk budget.
+    runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
@@ -34,6 +32,13 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends file rsync
           docker --version
+
+      - name: Free disk before build
+        run: |
+          # Ubuntu-latest runners have ~14G usable. Clear apt caches to maximize space.
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h /
 
       # Proton's `make redist` drives the steamrt4 SDK container itself
       # (configure.sh discovers docker; ROOTLESS_CONTAINER=0 makes the
