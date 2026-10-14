@@ -132,12 +132,12 @@ DXVDIR="${BUILD_DIR}/dxvk-${DXVK_RELEASE}"
 rm -rf "${DXVDIR}" && mkdir -p "${DXVDIR}"
 tar -xzf "${DXVK_DL}" -C "${DXVDIR}"
 RELEASE_DIR="${DIST_DIR}/steamflow-proton-11.0-purepe/files/lib/wine/dxvk"
-SRC64=$(find "${DXVDIR}" -path '*dxvk/x64/d3d11.dll' | head -1)
-SRC32=$(find "${DXVDIR}" -path '*dxvk/win32/d3d11.dll' | head -1)
+SRC64=$(find "${DXVDIR}" -path '*/dxvk/x64/d3d11.dll' -o -path '*/x64/d3d11.dll' | head -1)
+SRC32=$(find "${DXVDIR}" -path '*/dxvk/win32/d3d11.dll' -o -path '*/win32/d3d11.dll' | head -1)
 [ -n "${SRC64}" ] && [ -n "${SRC32}" ] || fail "DXVK release layout unexpected (x64/win32 d3d11.dll not found)"
 mkdir -p "${RELEASE_DIR}/x86_64-windows" "${RELEASE_DIR}/i386-windows"
-cp -f "${DXVDIR}"/dxvk-*/dxvk/x64/*.dll "${RELEASE_DIR}/x86_64-windows/"
-cp -f "${DXVDIR}"/dxvk-*/dxvk/win32/*.dll "${RELEASE_DIR}/i386-windows/"
+cp -f "$(dirname "${SRC64}")"/*.dll "${RELEASE_DIR}/x86_64-windows/"
+cp -f "$(dirname "${SRC32}")"/*.dll "${RELEASE_DIR}/i386-windows/"
 printf 'dxvk %s (release)\n' "${DXVK_RELEASE}" > "${RELEASE_DIR}/version"
 cat > "${DIST_DIR}/steamflow-proton-11.0-purepe/VERSIONS.txt" <<EOF
 WINE_COMMIT=${PROTON_REF}
