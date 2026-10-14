@@ -73,6 +73,13 @@ DXVK_SUB_SHORT="${DXVK_SUB:0:7}"
 
 log "== make redist (this is the long step) =="
 make -j"$(nproc)" redist 2>&1 | tee "${BUILD_DIR}/redist.log"
+if [ ! -d "${REDIST_DIR}" ]; then
+    log "WARN: redist not at expected path ${REDIST_DIR}; searching..."
+    find "${SRC_DIR}" -maxdepth 3 -type d -name redist 2>/dev/null || true
+    df -h "${SRC_DIR}" 2>/dev/null || true
+    ls -la "${SRC_DIR}/build/build--local/dist/" 2>/dev/null | head -20 || true
+    ls -la "${SRC_DIR}/build/build--local/" 2>/dev/null | head -20 || true
+fi
 [ -d "${REDIST_DIR}" ] || fail "make redist produced no ${REDIST_DIR}"
 
 log "== Pure-PE gates =="
