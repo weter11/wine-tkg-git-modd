@@ -48,8 +48,14 @@ jobs:
         run: |
           set -euo pipefail
           ref="${{ github.event.inputs.proton_ref || 'proton-11.0-2e' }}"
+          # The STEAMRT_IMAGE line in Makefile.in is tab-indented, so anchoring
+          # on ^ silently matched nothing and pipefail killed the step.
           stock=$(curl -fsL "https://raw.githubusercontent.com/ValveSoftware/Proton/${ref}/Makefile.in" \
-            | grep '^STEAMRT_IMAGE' | sed 's/.*?= *//')
+            | grep -m1 '^[[:space:]]*STEAMRT_IMAGE[[:space:]]*?=' | sed 's/.*?= *//' || true)
+          if [ -z "${stock}" ]; then
+            echo "ERROR: could not resolve STEAMRT_IMAGE from ${ref}" >&2
+            exit 1
+          fi
           echo "stock=${stock}"
           echo "stock=${stock}" >> "$GITHUB_OUTPUT"
 
@@ -63,11 +69,22 @@ jobs:
           set -euo pipefail
           docker run --rm "${{ steps.sdk.outputs.stock }}" bash -c '
             echo "--- stock container Wayland dev deps ---"
-            pkg-config --exists wayland-client  && echo "wayland-client:  yes" || echo "wayland-client:  NO"
-            pkg-config --exists wayland-egl     && echo "wayland-egl:     yes" || echo "wayland-egl:     NO"
-            pkg-config --exists xkbregistry     && echo "xkbregistry:     yes" || echo "xkbregistry:     NO"
-            ls /usr/include/xkbregistry/rxkb.h 2>&1 || true
-            command -v wayland-scanner || echo "wayland-scanner: NO"
+            for h in wayland-client.h wayland-egl.h xkbregistry/rxkb.h; do
+              if ls /usr/include/$h >/dev/null 2>&1; then echo "  header $h: present"; else echo "  header $h: MISSING"; fi
+            done
+            for l in wayland-client wayland-egl xkbregistry; do
+              if find /usr/lib /usr/lib64 -maxdepth 3 -name "lib${l}.so*" 2>/dev/null | grep -q .; then
+                echo "  lib $l: present"
+              else
+                echo "  lib $l: MISSING"
+              fi
+            done
+            if command -v wayland-scanner >/dev/null 2>&1; then
+              echo "  wayland-scanner: present"
+            else
+              echo "  wayland-scanner: MISSING"
+            fi
+            echo "  apt available: $(command -v apt-get >/dev/null && echo yes || echo no)"
           '
 
       - name: Build derived SDK image with libxkbregistry-dev
