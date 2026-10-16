@@ -140,6 +140,11 @@ log "== Staging variant B: clean release (DXVK ${DXVK_RELEASE} swapped in) =="
 rm -rf "${DIST_DIR}/steamflow-proton-11.0-purepe"
 cp -a "${REDIST_DIR}" "${DIST_DIR}/steamflow-proton-11.0-purepe"
 rm -rf "${DIST_DIR}/steamflow-proton-11.0-purepe/__pycache__"
+# The marker files written by the SDK container's dist steps (dxvk/version etc.)
+# can land root-owned, so a plain `>` truncation on them fails with Permission
+# denied even though the directory itself is writable. Proton's own Makefile
+# does rm-then-echo for these markers; mirror that here.
+rm -f "${DIST_DIR}/steamflow-proton-11.0-purepe/files/lib/wine/dxvk/version" 2>/dev/null || true
 DXVK_DL="${BUILD_DIR}/dxvk-${DXVK_RELEASE}.tar.gz"
 if [ ! -f "${DXVK_DL}" ]; then
     log "Downloading DXVK ${DXVK_RELEASE} release tarball"
@@ -162,7 +167,13 @@ SRC32=$(find "${DXVDIR}" -path '*/dxvk/x32/d3d11.dll' -o -path '*/x32/d3d11.dll'
 mkdir -p "${RELEASE_DIR}/x86_64-windows" "${RELEASE_DIR}/i386-windows"
 cp -f "$(dirname "${SRC64}")"/*.dll "${RELEASE_DIR}/x86_64-windows/"
 cp -f "$(dirname "${SRC32}")"/*.dll "${RELEASE_DIR}/i386-windows/"
-printf 'dxvk %s (release)\n' "${DXVK_RELEASE}" > "${RELEASE_DIR}/version"
+printf 'dxvk %s (release)\n' "${DXVK_RELEASE}" > "${RELEASE_DIR}/version" || {
+    # The container-written marker can be root-owned; unlink (needs only dir
+    # write perms) then retry once.
+    rm -f "${RELEASE_DIR}/version" 2>/dev/null || true
+    printf 'dxvk %s (release)\n' "${DXVK_RELEASE}" > "${RELEASE_DIR}/version" || \
+        fail "cannot write ${RELEASE_DIR}/version (ownership/permissions of staged tree)"
+}
 cat > "${DIST_DIR}/steamflow-proton-11.0-purepe/VERSIONS.txt" <<EOF
 WINE_COMMIT=${PROTON_REF}
 DXVK_VERSION=${DXVK_RELEASE} (release)
