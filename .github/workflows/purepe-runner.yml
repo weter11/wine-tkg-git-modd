@@ -4,25 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       proton_ref:
-        description: "Proton tag to build (default proton-11.0-1b, the phase-3 recipe pin)"
+        description: "Proton tag to build (default proton-11.0-2e, latest Valve release)"
         required: false
         type: string
-        default: "proton-11.0-1b"
+        default: "proton-11.0-2e"
       dxvk_release:
-        description: "DXVK release version for the clean variant (default 3.0.2)"
+        description: "DXVK release version for the clean variant (default 3.1.1)"
         required: false
         type: string
-        default: "3.0.2"
+        default: "3.1.1"
+      wayland_mode:
+        description: "derived = build an SDK image with libxkbregistry-dev (native Wayland); stock = Valve's SDK as-is (Wayland opt-in no-ops)"
+        required: false
+        type: string
+        default: "derived"
 
 jobs:
   build:
     name: Build PurePE Runners (release + rtx_remix_debug)
-    # Self-hosted: the full Proton redist peaks at ~20G of disk. GitHub-hosted
-    # runners expose only ~8-9G usable (14G total minus the runner image), so
-    # this job cannot run there. Larger runners (ubuntu-latest-4-core) are
-    # org/enterprise-only. Setup: ./setup-selfhosted-runner.sh on a machine
-    # with headroom + docker/podman (ccache persists there -> fast rebuilds).
-    runs-on: [self-hosted, linux, x64, steamflow-purepe]
+    # GitHub-hosted runner. The full Proton redist peaks at ~17-19GB of disk,
+    # so the build/ tree is cleaned before staging to stay within budget.
+    runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
@@ -35,18 +37,136 @@ jobs:
           sudo apt-get install -y --no-install-recommends file rsync
           docker --version
 
-      # Proton's `make redist` drives the steamrt4 SDK container itself
+      - name: Free disk before build
+        run: |
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h /
+
+      - name: Resolve stock SDK image
+        id: sdk
+        run: |
+          set -euo pipefail
+          ref="${{ github.event.inputs.proton_ref || 'proton-11.0-2e' }}"
+          # The STEAMRT_IMAGE line in Makefile.in is tab-indented, so anchoring
+          # on ^ silently matched nothing and pipefail killed the step.
+          stock=$(curl -fsL "https://raw.githubusercontent.com/ValveSoftware/Proton/${ref}/Makefile.in" \
+            | grep -m1 '^[[:space:]]*STEAMRT_IMAGE[[:space:]]*?=' | sed 's/.*?= *//' || true)
+          if [ -z "${stock}" ]; then
+            echo "ERROR: could not resolve STEAMRT_IMAGE from ${ref}" >&2
+            exit 1
+          fi
+          echo "stock=${stock}"
+          echo "stock=${stock}" >> "$GITHUB_OUTPUT"
+
+      # Valve's steamrt4 SDK ships wayland-client and wayland-egl dev files but
+      # NOT libxkbregistry-dev. wine's configure.ac gates winewayland.drv on all
+      # of WAYLAND_CLIENT_LIBS, WAYLAND_SCANNER, XKBCOMMON_LIBS and
+      # XKBREGISTRY_LIBS at once, so on the stock image the driver is silently
+      # skipped. This probe records what the stock image actually has.
+      - name: Probe stock SDK for Wayland dev deps
+        run: |
+          set -euo pipefail
+          docker run --rm "${{ steps.sdk.outputs.stock }}" bash -c '
+            echo "--- stock container Wayland dev deps ---"
+            for h in wayland-client.h wayland-egl.h xkbregistry/rxkb.h; do
+              if ls /usr/include/$h >/dev/null 2>&1; then echo "  header $h: present"; else echo "  header $h: MISSING"; fi
+            done
+            for l in wayland-client wayland-egl xkbregistry; do
+              if find /usr/lib /usr/lib64 -maxdepth 3 -name "lib${l}.so*" 2>/dev/null | grep -q .; then
+                echo "  lib $l: present"
+              else
+                echo "  lib $l: MISSING"
+              fi
+            done
+            if command -v wayland-scanner >/dev/null 2>&1; then
+              echo "  wayland-scanner: present"
+            else
+              echo "  wayland-scanner: MISSING"
+            fi
+            echo "  apt available: $(command -v apt-get >/dev/null && echo yes || echo no)"
+          '
+
+      - name: Build derived SDK image with libxkbregistry-dev
+        if: github.event.inputs.wayland_mode == 'derived'
+        run: |
+          set -euo pipefail
+          cat > Dockerfile.purepe-sdk <<'DOCKERFILE'
+          ARG STOCK
+          FROM ${STOCK}
+          RUN apt-get update -y && \
+              apt-get install -y --no-install-recommends libxkbregistry-dev libxkbcommon-dev && \
+              apt-get clean && rm -rf /var/lib/apt/lists/*
+          DOCKERFILE
+          docker build -t purepe-sdk-wayland:latest \
+            --build-arg STOCK="${{ steps.sdk.outputs.stock }}" \
+            -f Dockerfile.purepe-sdk .
+          echo "--- verify derived image ---"
+          docker run --rm purepe-sdk-wayland:latest bash -c '
+            pkg-config --exists xkbregistry && echo "xkbregistry: yes" || echo "xkbregistry: NO"
+            ls /usr/include/xkbregistry/rxkb.h
+            pkg-config --cflags xkbregistry
+          '
+
+      - name: Extract Wayland runtime libs from the SDK image
+        if: github.event.inputs.wayland_mode == 'derived'
+        run: |
+          set -euo pipefail
+          mkdir -p wayland-runtime
+          docker run --rm -v "$PWD/wayland-runtime:/out" purepe-sdk-wayland:latest bash -c '
+            for lib in libxkbregistry libwayland-egl; do
+              f=$(find /usr/lib -name "${lib}.so*" -type f 2>/dev/null | head -1)
+              if [ -n "$f" ]; then
+                cp "$f" /out/
+                echo "extracted $(basename "$f")"
+              else
+                echo "MISSING ${lib}.so in image"
+              fi
+            done
+          '
+          ls -l wayland-runtime
+
+      # Proton's `make redist` drives the SDK container itself
       # (configure.sh discovers docker; ROOTLESS_CONTAINER=0 makes the
-      # Makefile pass -u $(id -u):$(id -g), so all outputs are owned by the
+      # Makefile pass -u $(id -u):$(id -g), so outputs are owned by the
       # runner user — no chown needed).
       - name: Build (proton make machinery spawns the SDK container)
         env:
           PROTON_REF: ${{ github.event.inputs.proton_ref }}
           DXVK_RELEASE: ${{ github.event.inputs.dxvk_release }}
+          # Makefile.in declares `STEAMRT_IMAGE ?= ...`, and an environment
+          # variable takes precedence over a ?= default — this is how the
+          # derived image reaches the build without patching Makefile.in.
+          # NOTE: an EMPTY value also wins over ?= (verified: `STEAMRT_IMAGE= make`
+          # resolves to nothing), so stock mode must pass the real stock image
+          # rather than an empty string.
+          STEAMRT_IMAGE: ${{ github.event.inputs.wayland_mode == 'derived' && 'purepe-sdk-wayland:latest' || steps.sdk.outputs.stock }}
+          WAYLAND_REQUIRED: ${{ github.event.inputs.wayland_mode == 'derived' && '1' || '0' }}
+          WAYLAND_RUNTIME_DIR: ${{ github.event.inputs.wayland_mode == 'derived' && format('{0}/wayland-runtime', github.workspace) || '' }}
         run: |
           set -euo pipefail
           chmod +x ./build-purepe.sh
           ./build-purepe.sh
+
+      - name: Inspect Wayland artifacts
+        run: |
+          set -euo pipefail
+          echo "=== wayland files in each tarball ==="
+          for t in steamflow-proton-11.0-purepe steamflow-proton-11.0-purepe-rtx_remix_debug; do
+            echo "--- ${t} ---"
+            tar -tzf "build-purepe/dist/${t}.tar.gz" | grep -i wayland || echo "  (none)"
+          done
+          echo "=== ELF32 audit (must be zero) ==="
+          for t in steamflow-proton-11.0-purepe steamflow-proton-11.0-purepe-rtx_remix_debug; do
+            d=$(mktemp -d)
+            tar -xzf "build-purepe/dist/${t}.tar.gz" -C "$d"
+            n=$(find "$d" -type f -exec file {} + | grep -c 'ELF 32-bit' || true)
+            echo "  ${t}: ${n} ELF32 files"
+            if [ "${n}" != "0" ]; then
+              echo "  GATE VIOLATION"; exit 1
+            fi
+            rm -rf "$d"
+          done
 
       - name: Upload clean release tarball
         uses: actions/upload-artifact@v7

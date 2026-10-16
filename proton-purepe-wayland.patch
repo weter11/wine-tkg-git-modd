@@ -1,0 +1,128 @@
+diff --git a/proton b/proton
+index a2aef17..d0562bc 100755
+--- a/proton
++++ b/proton
+@@ -1529,6 +1529,7 @@ class Session:
+ 
+         self.compat_config = default_compat_config()
+         self.cmdlineappend = []
++        self.force_steam_input_appid = False
+ 
+         if "STEAM_COMPAT_CONFIG" in os.environ:
+             config = os.environ["STEAM_COMPAT_CONFIG"]
+@@ -1777,6 +1778,8 @@ class Session:
+         self.check_environment("PROTON_DISABLE_NVAPI", "disablenvapi")
+         self.check_environment("PROTON_FORCE_NVAPI", "forcenvapi")
+         self.check_environment("PROTON_HIDE_APU", "hideapu")
++        self.check_environment("PROTON_ENABLE_WAYLAND", "wayland")
++        self.check_environment("PROTON_USE_WAYLAND", "wayland")
+ 
+         if "nofsync" in self.compat_config:
+             self.env.pop("WINEFSYNC", "")
+@@ -1971,6 +1974,54 @@ class Session:
+         if self.nvidia_wine_dll_dir:
+             self.env["NVIDIA_WINE_DLL_DIR"] = self.nvidia_wine_dll_dir
+ 
++        # Native Wine Wayland driver (opt-in): when PROTON_ENABLE_WAYLAND=1
++        # (or legacy PROTON_USE_WAYLAND=1) is set AND a Wayland compositor is
++        # actually available, switch Wine from the X11 driver to the Wayland
++        # driver. Without opt-in, or without WAYLAND_DISPLAY, the current
++        # XWayland path is preserved unchanged.
++        if "wayland" in self.compat_config:
++            if "WAYLAND_DISPLAY" not in self.env:
++                # Opt-in requested but no compositor — clear the flag so we
++                # don't silently fall through to X11 with driver overrides
++                # half-applied.  The game will run via the default XWayland
++                # path with no extra env vars set here.
++                self.compat_config.discard("wayland")
++                log("PROTON_ENABLE_WAYLAND set but WAYLAND_DISPLAY not available — ignoring, using X11 path")
++            else:
++                # Disable the X11 driver and enable the Wayland driver.
++                self.dlloverrides["winex11.drv"] = "d"
++                self.dlloverrides["winewayland.drv"] = "b"
++                # This is required for OpenGL to work on winewayland
++                self.env["WINE_USE_EGL"] = "1"
++                # FSHack is not supported on winewayland (yet)
++                self.env["WINE_DISABLE_FULLSCREEN_HACK"] = "1"
++                # Enable the move hack
++                self.env.setdefault("WINE_MOVE_HACK", "1")
++                # It is not possible for winewayland to support xalia since
++                # there is no way to position toplevel surfaces dynamically in wayland
++                self.env["PROTON_USE_XALIA"] = "0"
++                # Never expose Steam's desktop virtual controller on winewayland.
++                self.env["PROTON_NO_STEAMINPUT"] = "1"
++                # Steam cannot track native Wayland window focus, so keep it from
++                # falling back to the global desktop controller layout.
++                self.force_steam_input_appid = True
++                # Disable other steam input related stuff
++                if nonzero(self.env["PROTON_NO_STEAMINPUT"]):
++                    # When steam input is disabled we need the ignored controllers to work again
++                    if "SDL_GAMECONTROLLER_IGNORE_DEVICES" in self.env:
++                        del self.env["SDL_GAMECONTROLLER_IGNORE_DEVICES"]
++                    # Some other steam input related options we need to remove
++                    if "SteamVirtualGamepadInfo" in self.env:
++                        del self.env["SteamVirtualGamepadInfo"]
++                    if "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD" in self.env:
++                        del self.env["SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD"]
++                # FIXME: temporary workaround for libxkbcommon's current integration
++                self.env.setdefault("XLOCALEDIR", g_proton.dist_dir + "share/X11/locale")
++                # Some strange bug with X displays. I have a hunch it is caused by ffmpeg but it's not logging anything...
++                if "DISPLAY" in self.env:
++                    del self.env["DISPLAY"]
++                log("Using native Wine Wayland driver")
++
+         if "PROTON_LOG" in self.env and nonzero(self.env["PROTON_LOG"]):
+             if self.setup_logging(append_forever=False):
+                 self.log_file.write("======================\n")
+@@ -2091,6 +2142,32 @@ class Session:
+             local_env = self.env
+         return subprocess.call(args, env=local_env, stderr=self.log_file, stdout=self.log_file)
+ 
++    def set_steam_input_appid(self, appid):
++        steam_bin = shutil.which("steam")
++        if not steam_bin:
++            log("Unable to set Steam Input AppID: steam executable not found.")
++            return False
++
++        env = dict(os.environ)
++        for name in ("SteamAppId", "SteamGameId", "STEAM_COMPAT_APP_ID"):
++            env.pop(name, None)
++
++        try:
++            result = subprocess.run(
++                [steam_bin, "steam://forceinputappid/" + str(appid)],
++                env=env,
++                stdin=subprocess.DEVNULL,
++                stdout=subprocess.DEVNULL,
++                stderr=subprocess.DEVNULL,
++                timeout=5,
++                check=False,
++            )
++        except (OSError, subprocess.TimeoutExpired) as e:
++            log("Unable to set Steam Input AppID: " + str(e))
++            return False
++
++        return result.returncode == 0
++
+     def run(self):
+         if shutil.which('steam-runtime-launcher-interface-0') is not None:
+             adverb = ['steam-runtime-launcher-interface-0', 'proton']
+@@ -2121,7 +2198,17 @@ class Session:
+             else:
+                 argv = [g_proton.wine_bin, "c:\\windows\\system32\\steam.exe"]
+ 
+-        rc = self.run_proc(adverb + argv + sys.argv[2:] + self.cmdlineappend)
++        steam_input_appid_forced = False
++        if self.force_steam_input_appid:
++            appid = os.environ.get("SteamGameId", os.environ.get("STEAM_COMPAT_APP_ID", "0"))
++            if str(appid).isdigit() and str(appid) != "0":
++                steam_input_appid_forced = self.set_steam_input_appid(appid)
++
++        try:
++            rc = self.run_proc(adverb + argv + sys.argv[2:] + self.cmdlineappend)
++        finally:
++            if steam_input_appid_forced:
++                self.set_steam_input_appid(0)
+ 
+         if remote_debug_proc:
+             remote_debug_proc.kill()
