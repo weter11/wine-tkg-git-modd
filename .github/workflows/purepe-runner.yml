@@ -147,6 +147,7 @@ jobs:
             echo "patches/wine-hotfixes/$d: $n patch files"
             test "$n" -gt 0 || { echo "missing patch dir: $d"; exit 1; }
           done
+          test -f patches/proton/83-nv_low_latency_wine.patch || { echo "missing patches/proton/83-nv_low_latency_wine.patch"; exit 1; }
 
       # Proton's `make redist` drives the SDK container itself
       # (configure.sh discovers docker; ROOTLESS_CONTAINER=0 makes the

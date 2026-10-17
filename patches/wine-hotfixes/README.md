@@ -21,6 +21,18 @@ Order of application (mirrors GE's own `patches/protonprep-valve-staging.sh`, li
     2. em-fixups/0001-winewayland-add-SNI-tray-icons-and-native-context-me.patch
     3. wineland-child-rendering/*.patch
     4. proton-purepe-wineland-diag.patch   (ours, see the repo root)
+    5. patches/proton/83-nv_low_latency_wine.patch  (Nvidia Reflex / VK_NV_low_latency2)
+
+Item 5 is **required**, and it is not ours: the child-rendering series' generator list
+(`USER_DRIVER_FUNCS` in `dlls/winevulkan/make_vulkan`, extended by patch 0041) makes the
+generated thunks call `vk_funcs->p_vkSetLatencySleepModeNV`, while the struct member and its
+win32u implementation are added only by GE's `patches/proton/83-nv_low_latency_wine.patch`.
+Without it `dlls/winevulkan/vulkan_thunks.c` fails to compile ~1.5 h into the build
+(2026-10-17, CI run 39062234007). GE applies their `patches/proton/*` set late in their script;
+`build-purepe.sh` applies item 5 right after item 4 and then runs a static gate that compares
+every `vk_funcs->p_vk*` reference in a freshly generated `vulkan_thunks.c` against the
+declarations in `include/wine/vulkan_driver.h` (75 functions / 75 declarations / 0 missing as of
+this writing), so this class of mismatch fails in seconds instead of hours.
 
 Base tree: `ValveSoftware/wine` commit **981e2f0b9007fd70a6e0ed6119cb18f4164e26f9** (the wine
 pin of GE-Proton11-9; `build-purepe.sh` switches the wine submodule to it via `WINE_PIN`).

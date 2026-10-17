@@ -107,6 +107,41 @@ if [ -n "${WINELAND_PATCH_ROOT:-}" ]; then
         || fail "diagnostic patch failed"
     grep -q 'WINELAND_IGNORE_OCCLUSION_CLIP' wine/dlls/winewayland.drv/wayland_surface.c \
         || fail "diagnostic patch marker missing"
+    # Nvidia Reflex / VK_NV_low_latency2 driver member + its win32u implementation. The
+    # child-rendering series' generator list (patch 0041) emits thunks calling
+    # vk_funcs->p_vkSetLatencySleepModeNV, while the member and implementation live in GE's
+    # patches/proton/83-nv_low_latency_wine.patch — without it winevulkan fails to compile
+    # ~1.5 h into the build (verified 2026-10-17, run 39062234007). GE applies their
+    # patches/proton/* set late, after the wayland series, so it goes here as well.
+    [ -f "${ROOT_DIR}/patches/proton/83-nv_low_latency_wine.patch" ] || fail "low-latency patch missing"
+    patch -p1 -s -d wine -i "${ROOT_DIR}/patches/proton/83-nv_low_latency_wine.patch" \
+        || fail "nv_low_latency_wine patch failed"
+    grep -q 'win32u_vkSetLatencySleepModeNV' wine/dlls/win32u/vulkan.c \
+        || fail "low-latency patch marker missing in win32u/vulkan.c"
+    grep -q 'p_vkSetLatencySleepModeNV' wine/include/wine/vulkan_driver.h \
+        || fail "low-latency patch marker missing in include/wine/vulkan_driver.h"
+
+    # Static completeness gate for the generated Vulkan thunks: every member the generator
+    # emits as vk_funcs->p_vkX must be declared in struct vulkan_funcs, otherwise the build
+    # dies at dlls/winevulkan/vulkan_thunks.c long after this step. Run the generator here
+    # (it only writes dlls/winevulkan/vulkan_thunks.c) and diff the two sets.
+    if command -v python3 >/dev/null 2>&1 && [ -f wine/dlls/winevulkan/make_vulkan ]; then
+        log "== Gate: Vulkan thunk members vs struct vulkan_funcs =="
+        if ( cd wine/dlls/winevulkan && python3 make_vulkan ) >"${BUILD_DIR}/make_vulkan.log" 2>&1; then
+            missing=$(grep -o 'vk_funcs->p_vk[A-Za-z0-9_]*' wine/dlls/winevulkan/vulkan_thunks.c \
+                      | sed 's/vk_funcs->//' | LC_ALL=C sort -u \
+                      | comm -23 - <(grep -o 'PFN_[A-Za-z0-9_]* p_vk[A-Za-z0-9_]*' wine/include/wine/vulkan_driver.h \
+                                      | awk '{print $2}' | LC_ALL=C sort -u))
+            if [ -n "${missing}" ]; then
+                log "GATE FAILED: thunks reference members absent from vulkan_driver.h:"
+                echo "${missing}" | sed 's/^/    /' >&2
+                fail "missing vulkan driver members (a GE patch that adds them is not applied)"
+            fi
+            log "  ok: every vk_funcs->p_vk* reference is declared"
+        else
+            log "WARN: make_vulkan did not run; skipping the thunk-membership gate"
+        fi
+    fi
     WINE_TREE_DESC="${PROTON_REF} + GE-Proton11-9 wine hotfixes + purepe diag"
 fi
 
