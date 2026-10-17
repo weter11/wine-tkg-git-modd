@@ -1,0 +1,19 @@
+diff --git a/dlls/winewayland.drv/wayland_keyboard.c b/dlls/winewayland.drv/wayland_keyboard.c
+index 4139771..e1ebb88 100644
+--- a/dlls/winewayland.drv/wayland_keyboard.c
++++ b/dlls/winewayland.drv/wayland_keyboard.c
+@@ -36,6 +36,14 @@
+ #include "wine/debug.h"
+ #include "wine/server.h"
+ 
++/* [purepe-compat] XKB_VMOD_NAME_SCROLL is @since libxkbcommon 1.8.0, while the Steam Runtime 4
++ * SDK image this build runs in ships 1.7.0 (Debian trixie). The macro is nothing but the
++ * virtual-modifier name string, so define it with the upstream value when the headers are older;
++ * this keeps the driver's behaviour identical without swapping the SDK's libxkbcommon. */
++#ifndef XKB_VMOD_NAME_SCROLL
++#define XKB_VMOD_NAME_SCROLL "ScrollLock"
++#endif
++
+ WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
+ WINE_DECLARE_DEBUG_CHANNEL(key);
+ 

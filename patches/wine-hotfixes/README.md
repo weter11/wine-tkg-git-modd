@@ -22,6 +22,16 @@ Order of application (mirrors GE's own `patches/protonprep-valve-staging.sh`, li
     3. wineland-child-rendering/*.patch
     4. proton-purepe-wineland-diag.patch   (ours, see the repo root)
     5. patches/proton/83-nv_low_latency_wine.patch  (Nvidia Reflex / VK_NV_low_latency2)
+    6. proton-purepe-wineland-buildcompat.patch    (ours: libxkbcommon 1.7.0 shim)
+
+Item 6 is a one-macro shim: the series' patch 0120 uses `XKB_VMOD_NAME_SCROLL`, which is
+`@since libxkbcommon 1.8.0`, while the derived Steam Runtime SDK image installs
+`libxkbcommon-dev` 1.7.0 from Debian trixie. The macro is only the virtual-modifier name string
+(`"ScrollLock"`, copied from upstream `xkbcommon-names.h`), so the shim is behaviour-neutral and
+avoids swapping the SDK's libxkbcommon. Without it the build dies at
+`dlls/winewayland.drv/wayland_keyboard.c` (CI run 39068975650, 1h32m in). A scan of every
+`XKB_*`/`xkb_*`/`rxkb_*` identifier used by `dlls/winewayland.drv/` against the 1.7.0 headers
+found this as the ONLY gap (the rest are wine-internal names).
 
 Item 5 is **required**, and it is not ours: the child-rendering series' generator list
 (`USER_DRIVER_FUNCS` in `dlls/winevulkan/make_vulkan`, extended by patch 0041) makes the

@@ -107,6 +107,15 @@ if [ -n "${WINELAND_PATCH_ROOT:-}" ]; then
         || fail "diagnostic patch failed"
     grep -q 'WINELAND_IGNORE_OCCLUSION_CLIP' wine/dlls/winewayland.drv/wayland_surface.c \
         || fail "diagnostic patch marker missing"
+    # Build-compat shim: the GE wayland series (0120) uses XKB_VMOD_NAME_SCROLL, @since
+    # libxkbcommon 1.8.0, while the derived SDK image ships 1.7.0 (Debian trixie) — the build died
+    # on it at dlls/winewayland.drv/wayland_keyboard.c (CI run 39068975650, 1h32m in).
+    log "== Applying purepe build-compat shim (libxkbcommon 1.7.0 headers) =="
+    [ -f "${ROOT_DIR}/proton-purepe-wineland-buildcompat.patch" ] || fail "build-compat patch missing"
+    patch -p1 -s -d wine -i "${ROOT_DIR}/proton-purepe-wineland-buildcompat.patch" \
+        || fail "build-compat patch failed"
+    grep -q 'define XKB_VMOD_NAME_SCROLL' wine/dlls/winewayland.drv/wayland_keyboard.c \
+        || fail "build-compat marker missing"
     # Nvidia Reflex / VK_NV_low_latency2 driver member + its win32u implementation. The
     # child-rendering series' generator list (patch 0041) emits thunks calling
     # vk_funcs->p_vkSetLatencySleepModeNV, while the member and implementation live in GE's

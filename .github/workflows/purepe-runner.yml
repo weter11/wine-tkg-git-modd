@@ -142,6 +142,7 @@ jobs:
           set -euo pipefail
           test -n "${{ github.event.inputs.wine_pin }}" || { echo "wineland_diag=on needs wine_pin"; exit 1; }
           test -f proton-purepe-wineland-diag.patch || { echo "diagnostic patch missing"; exit 1; }
+          test -f proton-purepe-wineland-buildcompat.patch || { echo "build-compat patch missing"; exit 1; }
           for d in wine-wayland em-fixups wineland-child-rendering; do
             n=$(ls patches/wine-hotfixes/$d/*.patch 2>/dev/null | wc -l)
             echo "patches/wine-hotfixes/$d: $n patch files"
