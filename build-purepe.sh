@@ -68,6 +68,48 @@ if [ ! -d "wine/dlls/winewayland.drv" ]; then
 fi
 log "wine tree has dlls/winewayland.drv (${PROTON_REF})"
 
+WINE_TREE_DESC="${PROTON_REF}"
+
+# --- optional: GE-Proton Wine-Wineland base (diagnostic builds) -----------------
+# WINE_PIN switches the wine tree from Valve's submodule pin to another commit, and
+# WINELAND_PATCH_ROOT applies GE-Proton's wine hotfixes in GE's own order (see
+# patches/protonprep-valve-staging.sh in gloriouseggroll/proton-ge-custom @ GE-Proton11-9),
+# followed by our diagnostic patch. Both default to empty: a normal purepe build is untouched.
+if [ -n "${WINE_PIN:-}" ]; then
+    log "== Switching wine submodule to ${WINE_PIN:0:12} =="
+    ( cd wine && git fetch --depth 1 origin "${WINE_PIN}" && git checkout -q FETCH_HEAD ) \
+        || fail "cannot check out wine commit ${WINE_PIN}"
+    WINE_SUB=$(git -C wine rev-parse HEAD)
+    log "wine tree now at ${WINE_SUB:0:12}"
+fi
+
+if [ -n "${WINELAND_PATCH_ROOT:-}" ]; then
+    [ -n "${WINE_PIN:-}" ] || fail "WINELAND_PATCH_ROOT needs WINE_PIN (the GE hotfixes only apply to that tree)"
+    [ -f "${ROOT_DIR}/proton-purepe-wineland-diag.patch" ] || fail "diagnostic patch file missing"
+    apply_wine_dir() {
+        local dir="$1" n=0 p
+        [ -d "${dir}" ] || fail "patch dir missing: ${dir}"
+        for p in "${dir}"/*.patch; do
+            [ -f "${p}" ] || continue
+            patch -Np1 -s -d wine -i "${p}" || fail "patch failed: $(basename "${p}")"
+            n=$((n + 1))
+        done
+        log "  applied ${n} patches from $(basename "${dir}")"
+    }
+    log "== Applying GE wine hotfixes (order as in GE protonprep-valve-staging.sh) =="
+    apply_wine_dir "${WINELAND_PATCH_ROOT}/wine-wayland"
+    patch -Np1 -s -d wine -i "${WINELAND_PATCH_ROOT}"/em-fixups/0001-*.patch \
+        || fail "SNI hotfix patch failed"
+    log "  applied em-fixups/0001 (SNI)"
+    apply_wine_dir "${WINELAND_PATCH_ROOT}/wineland-child-rendering"
+    log "== Applying purepe Wine-Wineland diagnostic patch (TRACE + trial switch) =="
+    patch -Np1 -s -d wine -i "${ROOT_DIR}/proton-purepe-wineland-diag.patch" \
+        || fail "diagnostic patch failed"
+    grep -q 'WINELAND_IGNORE_OCCLUSION_CLIP' wine/dlls/winewayland.drv/wayland_surface.c \
+        || fail "diagnostic patch marker missing"
+    WINE_TREE_DESC="${PROTON_REF} + GE-Proton11-9 wine hotfixes + purepe diag"
+fi
+
 log "== Applying pure-PE Makefile.in patch =="
 patch -p1 < "${PATCH_FILE}"
 grep -q 'Pure-PE WoW64' Makefile.in || fail "patch did not apply (marker not found)"
@@ -127,7 +169,7 @@ mkdir -p "${DIST_DIR}"
 cp -a "${REDIST_DIR}" "${DIST_DIR}/steamflow-proton-11.0-purepe-rtx_remix_debug"
 rm -rf "${DIST_DIR}/steamflow-proton-11.0-purepe-rtx_remix_debug/__pycache__"
 cat > "${DIST_DIR}/steamflow-proton-11.0-purepe-rtx_remix_debug/VERSIONS.txt" <<EOF
-WINE_COMMIT=${PROTON_REF}
+WINE_COMMIT=${WINE_TREE_DESC}
 DXVK_VERSION=${DXVK_SUB_SHORT} (dxvk)
 VKD3D_PROTON_VERSION=ef20c02 (vkd3d-proton)
 DXVK_NVAPI_VERSION=c68c350 (dxvk-nvapi)
@@ -178,7 +220,7 @@ printf 'dxvk %s (release)\n' "${DXVK_RELEASE}" > "${RELEASE_DIR}/version" || {
         fail "cannot write ${RELEASE_DIR}/version (ownership/permissions of staged tree)"
 }
 cat > "${DIST_DIR}/steamflow-proton-11.0-purepe/VERSIONS.txt" <<EOF
-WINE_COMMIT=${PROTON_REF}
+WINE_COMMIT=${WINE_TREE_DESC}
 DXVK_VERSION=${DXVK_RELEASE} (release)
 VKD3D_PROTON_VERSION=ef20c02 (vkd3d-proton)
 DXVK_NVAPI_VERSION=c68c350 (dxvk-nvapi)

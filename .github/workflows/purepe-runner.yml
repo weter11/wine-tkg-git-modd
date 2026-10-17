@@ -18,6 +18,16 @@ on:
         required: false
         type: string
         default: "derived"
+      wine_pin:
+        description: "Diagnostic only: wine commit to build instead of Valve's submodule pin. GE-Proton11-9 pin = 981e2f0b9007fd70a6e0ed6119cb18f4164e26f9"
+        required: false
+        type: string
+        default: ""
+      wineland_diag:
+        description: "off|on — with 'on' apply GE-Proton's Wine-Wineland wine hotfixes (patches/wine-hotfixes) + proton-purepe-wineland-diag.patch; requires wine_pin"
+        required: false
+        type: string
+        default: "off"
 
 jobs:
   build:
@@ -126,6 +136,18 @@ jobs:
           '
           ls -l wayland-runtime
 
+      - name: Check Wine-Wineland diagnostic inputs
+        if: github.event.inputs.wineland_diag == 'on'
+        run: |
+          set -euo pipefail
+          test -n "${{ github.event.inputs.wine_pin }}" || { echo "wineland_diag=on needs wine_pin"; exit 1; }
+          test -f proton-purepe-wineland-diag.patch || { echo "diagnostic patch missing"; exit 1; }
+          for d in wine-wayland em-fixups wineland-child-rendering; do
+            n=$(ls patches/wine-hotfixes/$d/*.patch 2>/dev/null | wc -l)
+            echo "patches/wine-hotfixes/$d: $n patch files"
+            test "$n" -gt 0 || { echo "missing patch dir: $d"; exit 1; }
+          done
+
       # Proton's `make redist` drives the SDK container itself
       # (configure.sh discovers docker; ROOTLESS_CONTAINER=0 makes the
       # Makefile pass -u $(id -u):$(id -g), so outputs are owned by the
@@ -143,6 +165,8 @@ jobs:
           STEAMRT_IMAGE: ${{ github.event.inputs.wayland_mode == 'derived' && 'purepe-sdk-wayland:latest' || steps.sdk.outputs.stock }}
           WAYLAND_REQUIRED: ${{ github.event.inputs.wayland_mode == 'derived' && '1' || '0' }}
           WAYLAND_RUNTIME_DIR: ${{ github.event.inputs.wayland_mode == 'derived' && format('{0}/wayland-runtime', github.workspace) || '' }}
+          WINE_PIN: ${{ github.event.inputs.wine_pin }}
+          WINELAND_PATCH_ROOT: ${{ github.event.inputs.wineland_diag == 'on' && format('{0}/patches/wine-hotfixes', github.workspace) || '' }}
         run: |
           set -euo pipefail
           chmod +x ./build-purepe.sh
@@ -171,7 +195,7 @@ jobs:
       - name: Upload clean release tarball
         uses: actions/upload-artifact@v7
         with:
-          name: steamflow-proton-11.0-purepe
+          name: ${{ github.event.inputs.wineland_diag == 'on' && 'wineland-diag-purepe' || 'steamflow-proton-11.0-purepe' }}
           path: build-purepe/dist/steamflow-proton-11.0-purepe.tar.gz
           retention-days: 30
           if-no-files-found: error
@@ -179,7 +203,7 @@ jobs:
       - name: Upload rtx_remix_debug tarball
         uses: actions/upload-artifact@v7
         with:
-          name: steamflow-proton-11.0-purepe-rtx_remix_debug
+          name: ${{ github.event.inputs.wineland_diag == 'on' && 'wineland-diag-purepe-rtx_remix_debug' || 'steamflow-proton-11.0-purepe-rtx_remix_debug' }}
           path: build-purepe/dist/steamflow-proton-11.0-purepe-rtx_remix_debug.tar.gz
           retention-days: 30
           if-no-files-found: error

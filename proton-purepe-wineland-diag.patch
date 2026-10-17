@@ -1,0 +1,89 @@
+diff --git a/dlls/winewayland.drv/wayland_surface.c b/dlls/winewayland.drv/wayland_surface.c
+index 8a6e7d0..11c44c2 100644
+--- a/dlls/winewayland.drv/wayland_surface.c
++++ b/dlls/winewayland.drv/wayland_surface.c
+@@ -3376,8 +3376,25 @@ static BOOL wayland_hwnd_dmabuf_frame_covers_client(struct wayland_surface *surf
+            rect.right >= width && rect.bottom >= height;
+ }
+ 
++/* [purepe-diag] Env switch for the trial variant. With WINELAND_IGNORE_OCCLUSION_CLIP=1 an
++ * occlusion clip no longer disables the direct parent dma-buf path, so the effect of that one
++ * condition can be measured with the very same binary (one build serves diagnosis + trial). */
++static BOOL wayland_surface_region_constraints_ignored(void)
++{
++    static int cached = -1;
++
++    if (cached < 0)
++    {
++        const char *env = getenv("WINELAND_IGNORE_OCCLUSION_CLIP");
++        cached = env && !strcmp(env, "1");
++        if (cached) WARN("[purepe-diag] occlusion clip is being ignored (trial variant)\n");
++    }
++    return cached;
++}
++
+ static BOOL wayland_surface_has_region_constraints(struct wayland_surface *surface)
+ {
++    if (wayland_surface_region_constraints_ignored()) return surface->shaped;
+     return surface->shaped || surface->occlusion_clipped;
+ }
+ 
+@@ -3386,18 +3403,46 @@ static BOOL wayland_surface_direct_dmabuf_candidate(struct wayland_surface *surf
+                                                     const hwnd_dmabuf_frame_info_t *frames,
+                                                     unsigned int count)
+ {
+-    if (count != 1) return FALSE;
+-    if (!wayland_surface_is_toplevel(surface)) return FALSE;
+-    if (frames[0].opened & HWND_DMABUF_FRAME_GDI_OVERLAY) return FALSE;
+-    if (!data || data->client_surface) return FALSE;
+-    if (data->window_contents) return FALSE;
+-    if (wayland_surface_has_region_constraints(surface))
+-    {
+-        TRACE("hwnd=%p direct parent dmabuf rejected for visual constraints\n", surface->hwnd);
+-        return FALSE;
+-    }
+-    if (!wayland_surface_client_fills_window(surface)) return FALSE;
+-    return wayland_hwnd_dmabuf_frame_covers_client(surface, &frames[0]);
++    /* [purepe-diag] Every branch of this decision is silent in the shipped build, which makes
++     * "0 x using direct parent dmabuf" impossible to attribute. Trace all of them, one line per
++     * call, and keep the two message stems the harness greps for. */
++    BOOL shaped = surface->shaped, occlusion_clipped = surface->occlusion_clipped;
++    BOOL ignore_clip = wayland_surface_region_constraints_ignored();
++    BOOL fills = FALSE, covers = FALSE, ok = FALSE;
++    const char *why = "accepted";
++
++    if (count != 1)
++        why = "count!=1";
++    else if (!wayland_surface_is_toplevel(surface))
++        why = "not-a-toplevel";
++    else if (frames[0].opened & HWND_DMABUF_FRAME_GDI_OVERLAY)
++        why = "gdi-overlay";
++    else if (!data)
++        why = "no-win-data";
++    else if (data->client_surface)
++        why = "has-client-surface";
++    else if (data->window_contents)
++        why = "has-window-contents";
++    else if (shaped)
++        why = "shaped";
++    else if (occlusion_clipped && !ignore_clip)
++        why = "occlusion-clipped";
++    else if (!(fills = wayland_surface_client_fills_window(surface)))
++        why = "client-does-not-fill-window";
++    else if (!(covers = wayland_hwnd_dmabuf_frame_covers_client(surface, &frames[0])))
++        why = "frame-does-not-cover-client";
++    else
++        ok = TRUE;
++
++    if (ok)
++        TRACE("hwnd=%p using direct parent dmabuf (count=%u shaped=%d occlusion_clipped=%d "
++              "ignore_clip=%d)\n", surface->hwnd, count, shaped, occlusion_clipped, ignore_clip);
++    else
++        TRACE("hwnd=%p direct parent dmabuf rejected: %s (count=%u shaped=%d occlusion_clipped=%d "
++              "ignore_clip=%d client_surface=%p window_contents=%p fills=%d covers=%d)\n",
++              surface->hwnd, why, count, shaped, occlusion_clipped, ignore_clip,
++              data ? data->client_surface : NULL, data ? data->window_contents : NULL, fills, covers);
++    return ok;
+ }
+ 
+ static BOOL wayland_surface_replace_direct_dmabuf_with_shm(struct wayland_surface *surface,
