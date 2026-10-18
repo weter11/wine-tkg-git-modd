@@ -1,8 +1,8 @@
 diff --git a/dlls/winewayland.drv/wayland_surface.c b/dlls/winewayland.drv/wayland_surface.c
-index 8a6e7d0..11c44c2 100644
+index cffb9a3..fb91355 100644
 --- a/dlls/winewayland.drv/wayland_surface.c
 +++ b/dlls/winewayland.drv/wayland_surface.c
-@@ -3376,8 +3376,25 @@ static BOOL wayland_hwnd_dmabuf_frame_covers_client(struct wayland_surface *surf
+@@ -3549,8 +3549,25 @@ static BOOL wayland_hwnd_dmabuf_frame_covers_client(struct wayland_surface *surf
             rect.right >= width && rect.bottom >= height;
  }
  
@@ -28,7 +28,7 @@ index 8a6e7d0..11c44c2 100644
      return surface->shaped || surface->occlusion_clipped;
  }
  
-@@ -3386,18 +3403,46 @@ static BOOL wayland_surface_direct_dmabuf_candidate(struct wayland_surface *surf
+@@ -3559,18 +3576,47 @@ static BOOL wayland_surface_direct_dmabuf_candidate(struct wayland_surface *surf
                                                      const hwnd_dmabuf_frame_info_t *frames,
                                                      unsigned int count)
  {
@@ -49,6 +49,7 @@ index 8a6e7d0..11c44c2 100644
 +     * call, and keep the two message stems the harness greps for. */
 +    BOOL shaped = surface->shaped, occlusion_clipped = surface->occlusion_clipped;
 +    BOOL ignore_clip = wayland_surface_region_constraints_ignored();
++    BOOL constrained = wayland_surface_has_region_constraints(surface);
 +    BOOL fills = FALSE, covers = FALSE, ok = FALSE;
 +    const char *why = "accepted";
 +
@@ -66,7 +67,7 @@ index 8a6e7d0..11c44c2 100644
 +        why = "has-window-contents";
 +    else if (shaped)
 +        why = "shaped";
-+    else if (occlusion_clipped && !ignore_clip)
++    else if (constrained)
 +        why = "occlusion-clipped";
 +    else if (!(fills = wayland_surface_client_fills_window(surface)))
 +        why = "client-does-not-fill-window";
